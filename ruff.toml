@@ -1,0 +1,12 @@
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "dist", "build"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C4", "PTH", "RUF"]
+
+[lint.isort]
+known-first-party = ["edge", "api", "copilot", "ml"]
+
+[format]
+quote-style = "double"

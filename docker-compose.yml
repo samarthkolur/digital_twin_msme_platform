@@ -1,0 +1,150 @@
+name: digital-cousin
+
+x-py-healthcheck: &py-healthcheck
+  interval: 15s
+  timeout: 3s
+  retries: 5
+  start_period: 10s
+
+services:
+  # --- Toolbox: lint/format/typecheck/test + git hooks. Not part of the
+  # default `up`/`watch` stack — invoked explicitly via `make lint`, etc.
+  toolbox:
+    profiles: ["tools"]
+    build:
+      context: .
+      dockerfile: docker/tools.Dockerfile
+    environment:
+      # Non-interactive: `docker compose run` has no TTY, and pnpm otherwise
+      # prompts to confirm node_modules changes when the bind-mounted
+      # install state doesn't exactly match its expectations.
+      CI: "true"
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 1883 || exit 1"]
+      <<: *py-healthcheck
+
+  edge:
+    build:
+      context: .
+      dockerfile: services/edge/Dockerfile
+      target: dev
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+    environment:
+      SENSOR_PROVIDER: ${SENSOR_PROVIDER:-simulated}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      DATABASE_PATH: /data/digital_cousin.sqlite3
+    volumes:
+      - sqlite-data:/data
+    develop:
+      watch:
+        - path: ./services/edge/src
+          target: /app/src
+          action: sync
+        - path: ./services/edge/pyproject.toml
+          action: rebuild
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      <<: *py-healthcheck
+
+  api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+      target: dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_PATH: /data/digital_cousin.sqlite3
+    volumes:
+      - sqlite-data:/data
+    develop:
+      watch:
+        - path: ./services/api/src
+          target: /app/src
+          action: sync
+        - path: ./services/api/pyproject.toml
+          action: rebuild
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      <<: *py-healthcheck
+
+  copilot:
+    build:
+      context: .
+      dockerfile: services/copilot/Dockerfile
+      target: dev
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - path: ${SECRETS_FILE:-./deploy/secrets.env.local}
+        required: false
+    environment:
+      COPILOT_LLM_MODE: ${COPILOT_LLM_MODE:-local}
+      API_URL: http://api:8000
+    develop:
+      watch:
+        - path: ./services/copilot/src
+          target: /app/src
+          action: sync
+        - path: ./services/copilot/pyproject.toml
+          action: rebuild
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      <<: *py-healthcheck
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      target: dev
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_COPILOT_URL: http://localhost:8001
+    develop:
+      watch:
+        - path: ./apps/dashboard/src
+          target: /workspace/apps/dashboard/src
+          action: sync
+        - path: ./apps/dashboard/index.html
+          target: /workspace/apps/dashboard/index.html
+          action: sync
+        - path: ./apps/dashboard/package.json
+          action: rebuild
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5173/"]
+      <<: *py-healthcheck
+
+  # --- Training job: not started by `up`/`watch`. Run via `make train`.
+  ml-trainer:
+    profiles: ["training"]
+    build:
+      context: .
+      dockerfile: services/ml/Dockerfile
+    volumes:
+      - ./services/ml/data:/app/data
+      - ./services/ml/artifacts:/app/artifacts
+
+volumes:
+  sqlite-data:
+  mosquitto-data:

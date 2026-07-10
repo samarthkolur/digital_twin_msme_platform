@@ -1,0 +1,49 @@
+[project]
+name = "edge"
+version = "0.1.0"
+description = "Digital Cousin edge service: sensor acquisition, feature extraction, state sync"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "paho-mqtt>=2.1",
+]
+
+[project.optional-dependencies]
+# Only installed on the Raspberry Pi deployment target (`uv sync --extra hardware`).
+# Kept out of the default sync so CI and dev containers on non-Pi hosts never
+# need to build/install GPIO-specific native extensions.
+hardware = [
+  "spidev>=3.6",
+  "RPi.GPIO>=0.7.1",
+  "w1thermsensor>=2.3",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "mypy>=1.13",
+  "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edge"]
+
+[tool.mypy]
+strict = true
+files = "src"
+
+[[tool.mypy.overrides]]
+# Hardware-only deps (Raspberry Pi target); not installed outside the `hardware` extra.
+module = ["spidev.*", "w1thermsensor.*", "RPi.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=70"
+testpaths = ["tests"]

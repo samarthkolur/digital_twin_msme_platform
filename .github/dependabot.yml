@@ -1,0 +1,64 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-dependencies:
+        dependency-type: development
+
+  - package-ecosystem: pip
+    directory: /services/edge
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: pip
+    directory: /services/api
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: pip
+    directory: /services/copilot
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: pip
+    directory: /services/ml
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /apps/dashboard
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/edge
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/api
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/copilot
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/ml
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,191 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+permissions:
+  contents: read
+
+jobs:
+  ts-quality:
+    name: TypeScript — lint, format, typecheck, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run format:check
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test
+      - run: pnpm run knip
+
+  python-quality:
+    name: Python (${{ matrix.service }}) — lint, format, typecheck, test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [edge, api, copilot, ml]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.9"
+      - run: uv python install 3.11
+      - name: ruff check
+        run: uvx ruff@0.8.0 check services/${{ matrix.service }}
+      - name: ruff format --check
+        run: uvx ruff@0.8.0 format --check services/${{ matrix.service }}
+      - name: Sync deps
+        working-directory: services/${{ matrix.service }}
+        run: uv sync --group dev
+      - name: mypy
+        working-directory: services/${{ matrix.service }}
+        run: uv run mypy .
+      - name: pytest
+        working-directory: services/${{ matrix.service }}
+        run: uv run pytest
+
+  docker-build:
+    name: Docker build (${{ matrix.image }}, ${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: apps/dashboard/Dockerfile
+            target: dev
+          - image: apps/dashboard/Dockerfile
+            target: prod
+          - image: services/edge/Dockerfile
+            target: prod
+          - image: services/api/Dockerfile
+            target: prod
+          - image: services/copilot/Dockerfile
+            target: prod
+          - image: services/ml/Dockerfile
+            target: ""
+          - image: docker/tools.Dockerfile
+            target: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image }}
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.image }}-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}-${{ matrix.target }}
+
+  compose-config:
+    name: Validate docker-compose config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose config --quiet
+      - run: docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
+
+  dockerfile-lint:
+    name: hadolint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        dockerfile:
+          - apps/dashboard/Dockerfile
+          - services/edge/Dockerfile
+          - services/api/Dockerfile
+          - services/copilot/Dockerfile
+          - services/ml/Dockerfile
+          - docker/tools.Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+          failure-threshold: warning
+
+  secret-scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level=high
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "0.5.9"
+      - name: pip-audit (per service)
+        run: |
+          for d in services/*/; do
+            echo "::group::pip-audit $d"
+            uv export --project "$d" --no-dev --format requirements-txt > /tmp/reqs.txt
+            uvx pip-audit -r /tmp/reqs.txt
+            echo "::endgroup::"
+          done
+
+  container-scan:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.29.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+          skip-dirs: node_modules,.venv
+
+  ci-status:
+    name: CI status
+    if: always()
+    needs:
+      - ts-quality
+      - python-quality
+      - docker-build
+      - compose-config
+      - dockerfile-lint
+      - secret-scan
+      - dependency-audit
+      - container-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any required job failed
+        run: |
+          if [ "${{ contains(needs.*.result, 'failure') }}" = "true" ]; then
+            echo "One or more required jobs failed."
+            exit 1
+          fi

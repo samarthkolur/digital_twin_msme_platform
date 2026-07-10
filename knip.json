@@ -1,0 +1,10 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "ignoreBinaries": ["ruff"],
+  "ignoreDependencies": ["@commitlint/cli", "lint-staged"],
+  "workspaces": {
+    "apps/dashboard": {
+      "project": ["src/**/*.{ts,tsx}"]
+    }
+  }
+}

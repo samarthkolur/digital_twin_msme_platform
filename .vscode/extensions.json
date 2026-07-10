@@ -1,0 +1,13 @@
+{
+  "recommendations": [
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "editorconfig.editorconfig",
+    "charliermarsh.ruff",
+    "ms-python.python",
+    "ms-python.mypy-type-checker",
+    "ms-azuretools.vscode-docker",
+    "redhat.vscode-yaml",
+    "vivaxy.vscode-conventional-commits"
+  ]
+}

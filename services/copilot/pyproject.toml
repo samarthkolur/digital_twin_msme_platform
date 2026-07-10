@@ -1,0 +1,46 @@
+[project]
+name = "copilot"
+version = "0.1.0"
+description = "Digital Cousin copilot: retrieval-grounded natural-language interface over machine state"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# Local inference path (TinyLlama via llama.cpp). Excluded from the default
+# sync because llama-cpp-python compiles native code at install time; kept
+# optional so CI/dev-container installs stay fast. The API-fallback path
+# (httpx, above) works without this extra.
+local-llm = [
+  "llama-cpp-python>=0.3.2",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/copilot"]
+
+[tool.mypy]
+strict = true
+files = "src"
+
+[[tool.mypy.overrides]]
+module = ["llama_cpp.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--cov=src --cov-report=term-missing --cov-fail-under=70"
+testpaths = ["tests"]

@@ -1,0 +1,57 @@
+# Production / Raspberry Pi deployment overrides.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Switches every service to its `prod` build target (no dev-server hot
+# reload), removes `develop.watch` (irrelevant outside local dev), and gives
+# the edge service real hardware access for the ADXL345 (SPI) and DS18B20
+# (1-Wire) sensors. Deploy this file to the Raspberry Pi 4 target.
+
+services:
+  edge:
+    build:
+      target: prod
+    develop: !reset []
+    environment:
+      SENSOR_PROVIDER: hardware
+    devices:
+      - "/dev/spidev0.0:/dev/spidev0.0"
+      - "/dev/gpiomem:/dev/gpiomem"
+    volumes:
+      - /sys/bus/w1:/sys/bus/w1
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  api:
+    build:
+      target: prod
+    develop: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  copilot:
+    build:
+      target: prod
+    develop: !reset []
+    environment:
+      COPILOT_LLM_MODE: local
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+
+  dashboard:
+    build:
+      target: prod
+    develop: !reset []
+    ports: !override
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+    deploy:
+      resources:
+        limits:
+          memory: 128M

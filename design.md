@@ -232,6 +232,36 @@ The copilot is a retrieval-augmented generation (RAG) system with a constrained 
 
 The copilot runs as an on-demand process (not resident), loading and unloading from RAM on each query. This avoids continuous RAM contention with the ML inference pipeline.
 
+### 7.6 Engineering & DevOps Tooling
+
+Established during the Phase 1 engineering-foundation build (see §21 Development Log). Covers the
+development environment, quality gates, and CI/CD — distinct from the deployed system's runtime
+stack in §7.0–§7.5.
+
+| Concern | Tool | Justification |
+|---|---|---|
+| Container orchestration (dev) | Docker Compose `watch` | Native sync/rebuild hot reload; no extra dev-server tooling needed on top of Docker |
+| Container orchestration (prod) | Docker Compose + `docker-compose.prod.yml` override | Single compose file family; Pi deployment is a straight `-f` override, not a parallel stack |
+| JS/TS package management | pnpm workspaces | Fast, disk-efficient, strict dependency resolution; workspace-native monorepo support |
+| Python package management | uv (per-service `pyproject.toml` + lockfile) | Single static binary, fast resolver, PEP 735 dependency groups; no host Python installs needed |
+| TypeScript | strict `tsconfig.base.json` (noUncheckedIndexedAccess, exactOptionalPropertyTypes, etc.) | Catches null/undefined and index-access bugs at compile time |
+| JS/TS linting | ESLint 9 flat config + typescript-eslint strict + import-x + jsx-a11y + promise | Single modern config format; strict type-aware rules; accessibility and promise-safety coverage |
+| Formatting | Prettier (JS/TS/JSON/MD/YAML) + `ruff format` (Python) | One opinionated formatter per language, wired into lint-staged and CI |
+| Python lint/format | ruff (global, versioned in the toolbox image) | Replaces flake8+isort+black with one fast tool |
+| Python type checking | mypy `strict`, per service | Needs each service's real dependency graph in scope, unlike ruff |
+| Unused code detection (TS) | knip | Single tool covering unused deps, exports, and dead files (replaces depcheck + ts-prune + unimported) |
+| Circular imports (TS) | `import-x/no-cycle` ESLint rule | No separate CLI tool needed |
+| Git hooks | Husky v9 (`pre-commit`, `commit-msg`) | Hooks shell into the toolbox container, so host needs only Docker, not Node/Python |
+| Lint-staged | lint-staged | Runs ESLint/Prettier/ruff only on staged files |
+| Commit convention | Conventional Commits + commitlint | Enforced at `commit-msg`; changelog-friendly history |
+| CI | GitHub Actions (`ci.yml`, `codeql.yml`) | ts-quality, python-quality (matrix), docker-build (matrix), compose config validation, hadolint, gitleaks, dependency audit, Trivy fs scan, CodeQL — all required |
+| Secret scanning | gitleaks | Runs in CI on full git history |
+| Dependency auditing | `pnpm audit` + `pip-audit` (per service) | Native-to-ecosystem, no third-party account needed |
+| Container/Dockerfile scanning | Trivy (filesystem scan) + hadolint | Standard, single-binary tools; no registry push required to scan |
+| Static analysis (security) | CodeQL (JS/TS + Python) | GitHub-native, free for public repos, no extra config surface |
+| Coverage gates | vitest coverage thresholds (v8) + `pytest --cov-fail-under` | Native to each test runner; avoids an external coverage SaaS/token |
+| Editor consistency | EditorConfig + VS Code workspace settings/recommendations | Works across contributors regardless of IDE choice |
+
 ---
 
 ## 8. Novelty and Research Contribution
@@ -316,3 +346,401 @@ The following limitations are explicitly acknowledged to maintain academic integ
 - Multi-machine scaling with a federated local deployment model.
 - Field validation study with a real MSME partner to assess adoption friction and deployment cost accuracy.
 - ZED/SAMARTH subsidy alignment: map hardware BOM to existing scheme eligibility criteria.
+
+---
+
+## 14. Repository Structure
+
+```
+.
+├── apps/
+│   └── dashboard/          React + Vite + TS dashboard (offline-first SPA)
+│       ├── src/
+│       ├── Dockerfile      multi-stage: base → deps → dev / build → prod (nginx)
+│       └── nginx.conf
+├── services/
+│   ├── edge/               Sensor acquisition + feature extraction (FastAPI)
+│   │   └── src/edge/providers/   base.py (interface), simulated.py, hardware.py
+│   ├── api/                REST API over the digital-twin state object (FastAPI)
+│   ├── copilot/             Retrieval-grounded NL copilot (FastAPI)
+│   └── ml/                  Offline training pipeline (Isolation Forest, 1D conv autoencoder)
+├── infra/
+│   └── mosquitto/           Local MQTT broker config
+├── docker/
+│   └── tools.Dockerfile     Toolbox image: node+pnpm+python+uv+ruff+git, used by hooks/Makefile/CI
+├── scripts/
+│   └── bootstrap.sh         Host validation + local env prep (the only pre-Docker step)
+├── .github/
+│   ├── workflows/ci.yml     lint/typecheck/test/build/security, matrixed per service
+│   ├── workflows/codeql.yml
+│   └── dependabot.yml
+├── .husky/                  pre-commit (lint-staged), commit-msg (commitlint) — run via toolbox
+├── .vscode/                 workspace settings + recommended extensions
+├── docker-compose.yml        dev stack (default `up`/`watch` target)
+├── docker-compose.prod.yml   Pi/production override (`-f docker-compose.yml -f docker-compose.prod.yml`)
+├── Makefile                  `make lint|format|typecheck|test|train|shell-tools|bootstrap|watch`
+├── package.json / pnpm-workspace.yaml / tsconfig.base.json / eslint.config.js
+├── ruff.toml                 shared Python lint/format config (per-service pyproject.toml extends it)
+├── CLAUDE.md                  documentation-first workflow rules for AI-assisted development
+└── design.md                  this document — canonical engineering memory
+```
+
+Each `services/*` directory is an independent `uv`-managed Python project (own `pyproject.toml`,
+own lockfile, own `.venv` inside its container) — there is no shared Python virtualenv across
+services, matching their independent deployment lifecycles (edge/api/copilot are always-on
+FastAPI services; ml is an on-demand training job).
+
+---
+
+## 15. Design Decisions
+
+| ID | Decision | Rationale |
+|---|---|---|
+| DD-001 | Docker-first onboarding: `git clone && ./scripts/bootstrap.sh && docker compose watch` is the entire setup | No host Node/Python/pnpm/uv installs required; deterministic across contributor machines |
+| DD-002 | Polyglot monorepo: pnpm workspace for TypeScript (`apps/*`) + independent `uv`-managed Python packages (`services/*`) | design.md's actual stack is Python-heavy (edge/ML/copilot) with React only for the dashboard (§7) — a single-language template would fight the domain |
+| DD-003 | Pluggable sensor provider abstraction (`SensorProvider` interface, `simulated`/`hardware` implementations, selected via `SENSOR_PROVIDER` env var) | ADXL345/DS18B20 need real GPIO/SPI/1-Wire hardware unavailable in dev/CI containers; app code must not know which provider is active |
+| DD-004 | `docker-compose.prod.yml` is an override file (`-f` merge), not a parallel compose stack, and is how the Pi switches `edge` to the hardware provider (via `devices:` passthrough + `SENSOR_PROVIDER=hardware`) | One source of truth for service topology; prod only changes build target, env, and device access |
+| DD-005 | Single "toolbox" image (`docker/tools.Dockerfile`) is the one environment for linting, formatting, type checking, testing, git hooks, and CI | Guarantees identical tool versions everywhere (host, hooks, CI) and keeps the host dependency-free per DD-001 |
+| DD-006 | `uv` for all Python dependency management (per-service `pyproject.toml` + lockfile) | Single static binary, fast resolver, native PEP 735 `dependency-groups`, no host Python venv required |
+| DD-007 | `ruff` installed once globally in the toolbox (dependency-free linting/formatting); `mypy` installed per-service and run via `uv run` | ruff doesn't need a project's dependencies to lint/format; mypy does (to resolve imported types), so it must run inside each service's own environment |
+| DD-008 | ESLint 9 flat config + `typescript-eslint` strict/stylistic type-checked configs + `eslint-plugin-import-x` (not `eslint-plugin-import`) | `import-x` is the maintained fork with first-class flat-config support |
+| DD-009 | `knip` for unused dependency / unused export / dead file detection in the TS workspace | One tool covers what would otherwise need depcheck + ts-prune + unimported |
+| DD-010 | Secrets live entirely outside the repository. `SECRETS_FILE` (default `$HOME/.config/digital-cousin/secrets.env`) is validated/created by `scripts/bootstrap.sh` and passed to the `copilot` container via `env_file:` | Copilot's optional Anthropic/OpenAI API fallback needs keys; the default `COPILOT_LLM_MODE=local` (TinyLlama/llama.cpp) needs none. Never committing even a placeholder `.env` with real structure to the repo avoids any risk of a filled-in copy being committed by accident |
+| DD-011 | `ml` service pins PyTorch to the CPU wheel index (`download.pytorch.org/whl/cpu` via `[tool.uv.sources]`) | Training runs on a dev PC/CI runner per §7 ("training only, on development PC"), not a GPU box; CUDA wheels would add multiple GB to every build for no benefit |
+| DD-012 | Compose `profiles: ["tools"]` (toolbox) and `["training"]` (ml-trainer) keep non-runtime containers out of the default `docker compose up`/`watch` set | Toolbox and the training job are invoked on demand (`make lint`, `make train`), not part of the always-on service topology |
+| DD-013 | No Turborepo / task-graph tool yet | Only one TypeScript package (`apps/dashboard`) exists; plain `pnpm -r --if-present run <script>` is sufficient. Revisit once a second TS package (e.g. shared types) exists |
+| DD-014 | Coverage gates are native to each test runner (vitest `coverage.thresholds`, `pytest --cov-fail-under`) rather than an external coverage SaaS | No third-party account/token needed to enforce a quality gate in CI |
+| DD-015 | Security scanning uses free, self-hosted-in-CI tools only: gitleaks (secrets), Trivy (filesystem/dependency CVEs), hadolint (Dockerfile lint), CodeQL (SAST), `pnpm audit`/`pip-audit` (dependency advisories) | No paid service or external account required — appropriate for a capstone project budget (§2 cost barrier is a core design constraint of the product itself) |
+| DD-016 | Mosquitto runs with `allow_anonymous true` and no TLS | The broker is only ever reachable on the Docker-internal network / Pi-local network in the current design (§6.1); tracked as Technical Debt (§25) to revisit before any network-exposed deployment |
+
+---
+
+## 16. Dependencies
+
+**Root (TypeScript tooling, devDependencies only — no runtime deps at the root):**
+`typescript`, `eslint` + `@eslint/js` + `typescript-eslint` + `eslint-plugin-{react,react-hooks,jsx-a11y,import-x,promise}` + `eslint-config-prettier`, `prettier`, `husky`, `lint-staged`, `@commitlint/{cli,config-conventional}`, `knip`.
+
+**`apps/dashboard`:** `react`, `react-dom` (runtime); `vite`, `@vitejs/plugin-react`, `vitest`, `@vitest/coverage-v8`, `@testing-library/{react,jest-dom}`, `jsdom` (dev).
+
+**`services/edge`:** `fastapi`, `uvicorn[standard]`, `pydantic`, `paho-mqtt` (runtime); optional extra `hardware` = `spidev`, `RPi.GPIO`, `w1thermsensor` (Pi-only, not installed by default sync).
+
+**`services/api`:** `fastapi`, `uvicorn[standard]`, `pydantic`.
+
+**`services/copilot`:** `fastapi`, `uvicorn[standard]`, `pydantic`, `httpx` (runtime, for the API-fallback path); optional extra `local-llm` = `llama-cpp-python` (compiles native code — kept optional so CI/dev-container installs stay fast).
+
+**`services/ml`:** `scikit-learn`, `torch` (CPU wheels, DD-011), `numpy`, `pandas`.
+
+**Every Python service** additionally declares a `dev` dependency group: `pytest`, `pytest-cov`, `mypy`, (+`httpx` for FastAPI services, needed by `TestClient`).
+
+No dependency has been added without a corresponding line item above and, where non-obvious, a DD in §15.
+
+---
+
+## 17. Environment Variables
+
+| Variable | Where | Default | Purpose |
+|---|---|---|---|
+| `SENSOR_PROVIDER` | `edge` | `simulated` (dev) / `hardware` (prod, via `docker-compose.prod.yml`) | Selects the `SensorProvider` implementation (DD-003) |
+| `MQTT_HOST` / `MQTT_PORT` | `edge` | `mosquitto` / `1883` | MQTT broker address on the Docker network |
+| `DATABASE_PATH` | `edge`, `api` | `/data/digital_cousin.sqlite3` | SQLite file inside the shared `sqlite-data` named volume |
+| `COPILOT_LLM_MODE` | `copilot` | `local` | `local` = TinyLlama/llama.cpp (no secrets); `api` = Anthropic/OpenAI fallback |
+| `API_URL` | `copilot` | `http://api:8000` | Internal Docker-network address of the REST API |
+| `VITE_API_URL`, `VITE_COPILOT_URL` | `dashboard` | `http://localhost:8000`, `http://localhost:8001` | Browser-facing URLs (host-mapped ports, not container-internal) |
+| `SECRETS_FILE` | root `.env` (compose variable substitution) | `$HOME/.config/digital-cousin/secrets.env` | Path to the external, non-repo secrets file (DD-010) |
+| `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | inside `$SECRETS_FILE` only, never in-repo | empty | Copilot API-fallback credentials; only read when `COPILOT_LLM_MODE=api` |
+
+`.env.example` documents all of these except the two secret keys, which exist only inside the
+externally-mounted `$SECRETS_FILE`.
+
+---
+
+## 18. External Integrations
+
+| Integration | Status | Notes |
+|---|---|---|
+| Anthropic / OpenAI API (copilot fallback) | Optional, not yet implemented beyond config plumbing | Only invoked when `COPILOT_LLM_MODE=api` and `$SECRETS_FILE` has a key set |
+| GitHub Actions | Active | CI (`ci.yml`), CodeQL (`codeql.yml`), Dependabot (`dependabot.yml`) |
+| GitHub remote | Active | `origin` → `https://github.com/samarthkolur/digital_twin_msme_platform.git` (see §29) |
+| Docker Hub / `ghcr.io` base images | Active (pull-only) | `node:22-slim`, `python:3.11-slim`, `nginx:1.27-alpine`, `eclipse-mosquitto:2.0`, `ghcr.io/astral-sh/uv:0.5.9` — no images are currently published, only pulled |
+| CWRU / IMS Bearing datasets | Planned (Phase 4) | Not yet integrated; referenced in §6.3 |
+
+---
+
+## 19. Infrastructure & Deployment
+
+**Local development:** `docker compose watch` — five services (`mosquitto`, `edge`, `api`,
+`copilot`, `dashboard`) rebuild/sync automatically on file changes via `develop.watch` blocks in
+`docker-compose.yml`. No bind-mounted `volumes:` are used for source code (avoids the classic
+host/container `node_modules` collision) — `watch` syncs deltas directly into the already-built
+dev image.
+
+**Production / Raspberry Pi:** `docker compose -f docker-compose.yml -f docker-compose.prod.yml up
+-d`. The override file (DD-004):
+- switches every service to its `prod` Dockerfile target (slim runtime, non-root user, no dev
+  server),
+- removes `develop.watch` (irrelevant outside local dev),
+- sets `SENSOR_PROVIDER=hardware` and passes through `/dev/spidev0.0`, `/dev/gpiomem`, and
+  `/sys/bus/w1` for real sensor access,
+- applies memory limits per service sized to the Pi 4's 4 GB budget (§7 resource table).
+
+**Persistence:** two named volumes — `sqlite-data` (state object store, shared by `edge`/`api`) and
+`mosquitto-data` (broker persistence).
+
+**Health checks:** every service exposes `/health` (FastAPI services) or `/healthz` (dashboard
+nginx); Compose `healthcheck:` blocks gate `depends_on: condition: service_healthy` (e.g. `edge`
+waits for `mosquitto`).
+
+**No CI-driven image publishing yet** — `ci.yml`'s `docker-build` job builds every target to prove
+it builds, but does not push. Publishing to a registry for actual Pi deployment is a deliberate
+follow-up (§26 Future Improvements) once there's a real pilot machine to deploy to.
+
+---
+
+## 20. Domain-Specific Components
+
+- **State object** (§6.0): the single source of truth synchronized by the edge layer; `api` reads
+  it, `dashboard` and `copilot` consume it via `api`. Not yet implemented beyond the schema
+  definition in §6.0 — Phase 3 work.
+- **`SensorProvider` abstraction** (DD-003, `services/edge/src/edge/providers/`): `base.py` defines
+  the interface (`read() -> SensorSample`), `simulated.py` generates plausible dev data,
+  `hardware.py` lazily imports `spidev`/`w1thermsensor` and currently raises `NotImplementedError`
+  on `read()` pending Phase 2 register-decoding work — the provider-selection plumbing is done, the
+  ADXL345 wire protocol is not.
+- **Copilot retrieval/prompt-construction logic** (§6.4): not yet implemented — `services/copilot`
+  currently only exposes `/health`.
+- **ML training pipeline** (§6.3): `services/ml` has the package/dependency/CI skeleton only;
+  Isolation Forest and autoencoder implementations are Phase 4 work.
+
+---
+
+## 21. Current Phase
+
+**Phase 1: Research & setup (M1–M2)** — per the delivery plan (§10). This engineering-foundation
+build is the "development environment configured" deliverable of Phase 1.
+
+## 22. Current Milestone
+
+Development environment configured (Phase 1 deliverable). Outstanding within this milestone:
+hardware procurement and pilot machine identification (tracked in §24 Pending Tasks) are the only
+Phase 1 items not addressed by this engineering-foundation work.
+
+## 23. Completed Milestones
+
+- **Engineering foundation established** (this work, logical time 2026-07-11): Docker-first dev
+  environment (`docker compose watch`), polyglot pnpm+uv monorepo, strict TS + ESLint flat config +
+  Prettier, ruff + mypy strict per Python service, Husky/lint-staged/commitlint, GitHub Actions CI
+  (lint/typecheck/test/build/security matrixed across 4 Python services + dashboard), CodeQL,
+  Dependabot, `scripts/bootstrap.sh` onboarding, VS Code workspace config, and skeleton services
+  (`edge`, `api`, `copilot`, `ml`, `dashboard`) each with a working health check and passing tests.
+
+## 24. Pending Tasks
+
+- [ ] Procure hardware: ADXL345/MPU6050, DS18B20, Raspberry Pi 4 (§6.2 BOM)
+- [ ] Identify and gain access to the pilot machine (real MSME asset or lab equivalent, §11 risk)
+- [ ] Implement ADXL345 SPI register decoding in `HardwareSensorProvider.read()` (Phase 2)
+- [ ] Implement the state object sync loop (edge → SQLite) and the `api` read endpoints (Phase 3)
+- [ ] Download/preprocess CWRU + IMS datasets into `services/ml` (Phase 4)
+- [ ] Implement Isolation Forest + 1D conv autoencoder training in `services/ml/src/ml/pipeline.py` (Phase 4)
+- [ ] Implement copilot retrieval + prompt construction + rule-based fallback (Phase 5)
+- [ ] Build out the real dashboard (health gauge, trends, alerts, ROI estimator) (Phase 3/5)
+- [ ] Add a multi-arch (`linux/arm64`) image publish workflow once ready to deploy to a real Pi (§26)
+- [ ] Generate and commit `pnpm-lock.yaml` and each service's `uv.lock` (first `bootstrap.sh` / `uv sync` run)
+
+## 25. Known Issues
+
+- Mosquitto broker has `allow_anonymous true` and no TLS (DD-016) — acceptable only while the
+  broker is unreachable outside the Docker network / Pi-local network.
+- `HardwareSensorProvider.read()` raises `NotImplementedError` — the hardware path is not yet
+  functional (by design, this phase is tooling-only; see §24).
+- No `uv.lock` / `pnpm-lock.yaml` committed as of this entry — generated and committed as part of
+  validating this foundation (see §28 Development Log for the exact commands run).
+
+## 26. Technical Debt
+
+- Mosquitto authentication/TLS deferred until the broker is ever exposed beyond localhost/LAN.
+- No CI image-publishing workflow yet (builds are verify-only); needed before real Pi deployment.
+- `docker-compose.prod.yml` device passthrough (`/dev/spidev0.0`, `/dev/gpiomem`) is hard-coded to
+  the default SPI bus/device — revisit if the retrofit protocol (§11) ends up needing configurable
+  bus addressing across different pilot machines.
+- Coverage thresholds (60% dashboard, 70% Python services) are placeholders sized for the current
+  skeleton; raise as real feature code lands.
+
+## 27. Future Improvements
+
+- Add a `docker-publish.yml` (manual dispatch) workflow for multi-arch (`linux/amd64`+`linux/arm64`)
+  builds pushed to GHCR, once there's a pilot machine to deploy to.
+- Consider Turborepo once a second TypeScript package exists (DD-013).
+- Consider InfluxDB OSS if SQLite query complexity grows, per §7's original stack note.
+- Add mosquitto auth (username/password or client certs) before any non-localhost exposure.
+- Add an end-to-end test harness (e.g. Playwright) once the dashboard has real UI beyond the
+  current placeholder.
+
+---
+
+## 28. Development Log
+
+### Entry 1 — Phase 1, M1–M2 (logical project time: 2026-07-11)
+
+**Task completed:** Established the production engineering foundation (Docker-first dev
+environment, polyglot pnpm+uv monorepo, quality gates, CI/CD, bootstrap tooling) per the
+foundation-only scope agreed with the user — no application features implemented.
+
+**Files created:** `.editorconfig`, `.gitignore`, `.gitattributes`, `.dockerignore`,
+`.env.example`, `package.json`, `pnpm-workspace.yaml`, `tsconfig.base.json`, `eslint.config.js`,
+`.prettierrc.json`, `.prettierignore`, `.lintstagedrc.json`, `commitlint.config.js`, `knip.json`,
+`Makefile`, `ruff.toml`, `docker-compose.yml`, `docker-compose.prod.yml`,
+`docker/tools.Dockerfile`, `.husky/{pre-commit,commit-msg}`, `.vscode/{settings,extensions}.json`,
+`.github/workflows/{ci,codeql}.yml`, `.github/dependabot.yml`, `.github/PULL_REQUEST_TEMPLATE.md`,
+`README.md`, `scripts/bootstrap.sh`, `infra/mosquitto/mosquitto.conf`,
+`apps/dashboard/**` (Vite+React+TS scaffold, Dockerfile, nginx.conf, sample test),
+`services/{edge,api,copilot,ml}/**` (pyproject.toml, `src/` package, `tests/`, Dockerfile). Full
+tree in §14.
+
+**Files modified:** `design.md` (this document — §7.6, §14–§29 added).
+
+**Files deleted:** none.
+
+**Reason for change:** User requested a production-grade engineering foundation
+("`git clone && ./scripts/bootstrap.sh && docker compose watch`, no host installs beyond Docker")
+per CLAUDE.md's documentation-first workflow. Before implementing, flagged and resolved a real
+mismatch between the requested Node/TS-centric tooling (pnpm, strict TS, ESLint flat config,
+Docker Compose watch) and the project's actual mostly-Python stack (§7) via three clarifying
+questions — resolved as: polyglot monorepo, pluggable hardware/simulated sensor abstraction, and
+minimal-skeleton service code (see DD-002, DD-003 and this entry's scope).
+
+**Architectural decisions:** See §15 DD-001 through DD-016.
+
+**Remaining work:** See §24 Pending Tasks. Immediately next: run `pnpm install` / `uv sync` per
+service to generate and commit lockfiles, then validate `docker compose build`, `docker compose
+watch`, lint/typecheck/test, and the git hooks end-to-end (tracked as this entry's validation pass
+— results appended to this log once complete).
+
+**Known issues:** See §25.
+
+**Recommended next task:** Complete the validation pass (lockfiles + `docker compose build` +
+quality gates), then move to Phase 1's remaining deliverables — hardware procurement and pilot
+machine identification (§24) — before starting Phase 2 (IoT data pipeline) implementation.
+
+### Entry 2 — Phase 1, M1–M2 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Full validation pass of the engineering foundation from Entry 1 — lockfile
+generation, quality gates, and an actual end-to-end run of `docker compose watch` (not just static
+review). Found and fixed two real bugs that static review missed.
+
+**Files created:** `pnpm-lock.yaml`, `services/{edge,api,copilot,ml}/uv.lock` (generated, then
+committed for deterministic installs per DD-001).
+
+**Files modified:**
+- `pnpm-workspace.yaml` — added `allowBuilds: {esbuild: true, unrs-resolver: true}` (pnpm 11 blocks
+  postinstall scripts by default; both are legitimate: esbuild is Vite's bundler, unrs-resolver is
+  eslint-plugin-import-x's resolver).
+- `package.json`, `apps/dashboard/package.json` — added `"type": "module"` to silence a Node ESM
+  warning on `eslint.config.js`/`commitlint.config.js`.
+- `.prettierignore` — added `CLAUDE.md` (hand-maintained instructions file, not ours to reformat).
+- `apps/dashboard/vite.config.ts` — coverage `exclude` now spreads `coverageConfigDefaults.exclude`
+  instead of replacing it (was silently un-excluding config/type-declaration files from the "all
+  files" coverage scan); added `src/main.tsx` (untestable bootstrap entrypoint) to the exclude list
+  after the first `pnpm run test` run correctly failed the coverage gate on it.
+- `knip.json` — added `ignoreDependencies` for `@commitlint/cli`/`lint-staged` (used only via
+  `.husky/*` hooks, which knip's static analysis doesn't trace) and `ignoreBinaries: ["ruff"]` (an
+  external Python binary, not an npm package); removed a redundant explicit `entry` that knip's
+  Vite plugin already infers.
+- **`apps/dashboard/Dockerfile`** (real bug): `tsconfig.base.json` was only `COPY`'d in the `build`
+  stage, not `deps` (inherited by `dev`) — the `dev` target crashed on boot with
+  `failed to resolve "extends": "../../tsconfig.base.json"` the moment Vite tried to transform any
+  file. Moved the `COPY` up to `deps` so both `dev` and `build` get it. Caught by actually booting
+  `docker compose watch` and hitting the dashboard, not by `docker compose build` succeeding (the
+  image built fine — the failure was only at container *runtime*).
+- **`docker-compose.prod.yml`** (real bug): `dashboard.ports` in the override only added `8080:8080`
+  under Compose's default merge-by-append behavior, so the prod container ended up with both the
+  stale dev mapping (`5173:5173`, nothing listens on it in the `prod` nginx image) and the real one.
+  Fixed with the `ports: !override` YAML tag so the override *replaces* rather than merges. Caught
+  by inspecting `docker compose -f ... -f docker-compose.prod.yml ps` output, not by `config
+  --quiet` (which validates syntax, not the merged semantics).
+- **`docker-compose.yml`** (real bug): `docker compose run --rm --no-deps toolbox pnpm exec
+  lint-staged` failed non-interactively with `[ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY]` — pnpm
+  wanted to confirm a `node_modules` recreation and had no TTY to ask in (`docker compose run`
+  without `-it`). Added `environment: CI: "true"` to the `toolbox` service, which is pnpm's own
+  documented fix for this exact error. This is the mechanism the Husky hooks (`.husky/pre-commit`,
+  `.husky/commit-msg`) depend on, so this bug would have made every commit hang or fail.
+
+**Files deleted:** none.
+
+**Reason for change:** CLAUDE.md's validation checklist requires proving `docker compose watch`,
+hot reload, and git hooks actually work — not just that files parse or images build. Static
+correctness (Dockerfile syntax, Compose YAML validity) does not imply runtime correctness; two of
+the three bugs above (`tsconfig.base.json`, the ports merge) had 100% clean `docker compose build`
+and `docker compose config --quiet` output and would only surface when a developer actually ran
+`docker compose watch` or deployed to prod.
+
+**Architectural decisions:** No new DDs — all fixes are corrections of Entry 1's implementation
+against its own stated design, not new decisions.
+
+**What was actually verified, end to end, in this session (not just "should work"):**
+- `pnpm install` → lockfile generated, Husky `prepare` hook ran successfully.
+- `pnpm run format:check`, `lint`, `typecheck`, `test` (with coverage thresholds), `knip` — all
+  green on the real toolchain (pnpm 11.11.0, Node 24 host / Node 22 containers, ESLint 9.39.4,
+  TypeScript 5.9.3, Vitest 2.1.9, knip 5.88.1).
+- Each of `services/{edge,api,copilot,ml}`: `uv sync --group dev`, `mypy .` (strict, 0 errors),
+  `pytest` (coverage ≥70% gate met in every service), `ruff check` + `ruff format --check` — all
+  green. `services/ml`'s `torch==2.13.0+cpu` confirmed resolving from the CPU wheel index (DD-011),
+  not a multi-GB CUDA build.
+- `docker compose build` for all four app/service `dev` targets and all four `prod` targets, plus
+  `docker/tools.Dockerfile` — all succeed.
+- `docker compose config --quiet` for both the base file and the `-f docker-compose.yml -f
+  docker-compose.prod.yml` merge (including the `!reset`/`!override` YAML tags).
+- `docker compose up -d`: all five dev services (`mosquitto`, `edge`, `api`, `copilot`, `dashboard`)
+  reach `healthy`; `edge`'s `depends_on: mosquitto: condition: service_healthy` correctly gated its
+  start until the broker was healthy; hit `/health` on `api`/`copilot` and `/` on the dashboard.
+- `docker compose watch`: edited `apps/dashboard/src/App.tsx` and `services/api/src/api/main.py`
+  while the stack was running under `watch` and confirmed both changes propagated live (dashboard:
+  Vite HMR via `develop.watch` sync; api: `uvicorn --reload` picked up the synced file) without any
+  manual rebuild — this is the literal `docker compose watch` requirement from the task, verified
+  live rather than assumed from the compose file's `develop.watch` blocks.
+- Prod overlay (`docker-compose.prod.yml`) brought up for `dashboard`/`api`/`copilot`/`mosquitto`
+  (excluding `edge`, which needs real `/dev/spidev0.0` + `/dev/gpiomem` device access on a real Pi —
+  not available in this dev environment, so DD-003's provider abstraction remains unverified against
+  real hardware, only against the compose device-passthrough wiring itself) — all reached `healthy`,
+  including the nginx-served dashboard on its production port 8080.
+- Husky wiring: confirmed `core.hooksPath` points at `.husky/_` and its dispatch shims exist for
+  every git hook Husky manages. Ran the *underlying* commands the hooks invoke
+  (`docker compose run --rm --no-deps toolbox pnpm exec lint-staged`/`commitlint`) directly rather
+  than through a real `git commit`, to validate the mechanism without creating a commit the user
+  didn't ask for. `commitlint` correctly accepted a valid Conventional Commit message and rejected
+  an invalid one with the expected `subject-empty`/`type-empty` errors.
+
+**Remaining work:** Same as Entry 1 §24, plus: `hadolint` was checked only via CI config, not run
+locally against the Dockerfiles in this session (deferred, not blocking — CI's `dockerfile-lint`
+job covers it on the first push). Recommend running `make lint`/`make typecheck`/`make test` (the
+containerized path via the toolbox) at least once before relying on it, in addition to the host-run
+validation done here, since the two Dockerfile/Compose bugs above prove build success does not
+guarantee runtime success.
+
+**Known issues:** See §25 — none newly introduced; the two bugs found here are already fixed, not
+outstanding.
+
+**Recommended next task:** Unchanged from Entry 1 — hardware procurement and pilot machine
+identification (§24), then Phase 2.
+
+---
+
+## 29. Current Repository State
+
+- **Branch:** `main`, tracking `origin/main`.
+- **Remote:** `https://github.com/samarthkolur/digital_twin_msme_platform.git`.
+- **Commit history:** single "first commit" (CLAUDE.md, design.md, initial `.gitattributes`/
+  `.gitignore`) predates this entry; this engineering-foundation work is the first substantial
+  change on top of it.
+- **Toolchain versions pinned:** Node `>=22` in containers (`packageManager: pnpm@11.11.0` via
+  corepack; host validation used Node 24, which is forward-compatible), Python `3.11` (matching the
+  Raspberry Pi OS Lite target in §7), `uv` `0.5.9`, `ruff` `0.8.0`.
+- **Lockfiles committed:** `pnpm-lock.yaml` and `services/{edge,api,copilot,ml}/uv.lock`, generated
+  and verified during Entry 2's validation pass — `docker compose build`/`bootstrap.sh` use these
+  with `--frozen-lockfile`/`uv sync`, not floating resolution.
+- **No application features implemented** — every service exposes a working `/health` endpoint and
+  passing tests, but the state object sync, sensor register decoding, ML training, and copilot
+  retrieval logic are all still Pending Tasks (§24), by design (this was a foundation-only task).
+- **Engineering foundation is runtime-verified, not just statically reviewed** (Entry 2): `docker
+  compose watch` hot reload, health-gated startup ordering, the prod Compose overlay, and the Husky
+  → toolbox → lint-staged/commitlint hook chain were all exercised live, and two real bugs surfaced
+  only by doing so (see Entry 2) — both fixed before this entry.
