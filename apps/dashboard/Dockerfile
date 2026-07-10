@@ -28,7 +28,7 @@ WORKDIR /workspace/apps/dashboard
 RUN pnpm run build
 
 # --- prod: nginx serving the static bundle, non-root, minimal image --------
-FROM nginx:1.27-alpine AS prod
+FROM nginx:1.31-alpine AS prod
 RUN addgroup -S dashboard && adduser -S dashboard -G dashboard
 COPY apps/dashboard/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /workspace/apps/dashboard/dist /usr/share/nginx/html
