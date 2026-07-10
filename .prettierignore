@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+**/dist/
+**/build/
+**/coverage/
+**/node_modules/
+**/.venv/
+**/*.min.js
+design.md
+CLAUDE.md
+CHANGELOG.md

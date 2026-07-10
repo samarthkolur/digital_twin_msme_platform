@@ -1,1 +1,56 @@
-/.editorconfig
+# --- secrets (never commit) ---
+*.secrets.env
+secrets.env
+.env
+.env.*
+!.env.example
+
+# --- Node / pnpm ---
+node_modules/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+coverage/
+.vite/
+.pnpm-store/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# --- ML artifacts ---
+services/ml/data/
+services/ml/artifacts/
+*.tflite
+*.onnx
+*.pt
+*.ckpt
+
+# --- data / runtime state ---
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# --- Docker / OS ---
+.DS_Store
+Thumbs.db
+
+# --- Editor ---
+.idea/
+*.swp
+
+# --- Logs ---
+*.log
+npm-debug.log*
+pnpm-debug.log*
