@@ -15,7 +15,7 @@ dependencies = [
 # Kept out of the default sync so CI and dev containers on non-Pi hosts never
 # need to build/install GPIO-specific native extensions.
 hardware = [
-  "spidev>=3.6",
+  "spidev>=3.8",
   "RPi.GPIO>=0.7.1",
   "w1thermsensor>=2.3",
 ]
