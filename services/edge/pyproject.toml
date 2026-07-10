@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Digital Cousin edge service: sensor acquisition, feature extraction, state sync"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "fastapi>=0.115",
+  "fastapi>=0.139.0",
   "uvicorn[standard]>=0.32",
   "pydantic>=2.9",
   "paho-mqtt>=2.1",
