@@ -151,8 +151,8 @@ jobs:
         run: |
           for d in services/*/; do
             echo "::group::pip-audit $d"
-            uv export --project "$d" --no-dev --format requirements-txt > /tmp/reqs.txt
-            uvx pip-audit -r /tmp/reqs.txt
+            uv export --project "$d" --no-dev --no-emit-project --format requirements-txt > /tmp/reqs.txt
+            uvx pip-audit --no-deps -r /tmp/reqs.txt
             echo "::endgroup::"
           done
 
