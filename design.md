@@ -421,8 +421,9 @@ FastAPI services; ml is an on-demand training job).
 | DD-016 | Mosquitto runs with `allow_anonymous true` and no TLS | The broker is only ever reachable on the Docker-internal network / Pi-local network in the current design (§6.1); tracked as Technical Debt (§25) to revisit before any network-exposed deployment |
 | DD-017 | All six Dockerfiles suppress hadolint DL3008 (`# hadolint ignore=DL3008` above each `apt-get install`) instead of pinning exact Debian/Ubuntu package versions for `curl`/`ca-certificates`/`git`/`python3.11` | These packages come from each image's own base (`python:3.11-slim`, `node:22-slim`) and track that base's own security patches; hard-pinning a specific Debian package version would silently break (or go stale) every time the upstream base image is bumped, for no real reproducibility gain since the base image itself is not pinned to a digest |
 | DD-018 | `apps/dashboard`'s `vite`/`vitest`/`@vitest/coverage-v8` bumped from the 5.x/2.x line to `^6.4.3`/`^3.2.7`, plus a `pnpm-workspace.yaml` `overrides.vite: ^6.4.3` | `pnpm audit --audit-level=high` failed CI (GHSA-fx2h-pf6j-xcff `vite` high, GHSA-5xrq-8626-4rwp `vitest` moderate); bumping the direct `vite`/`vitest` deps alone left vitest's own `vite-node`/`@vitest/mocker` sub-dependencies resolving an independent, still-vulnerable `vite@5.4.21` (confirmed via `pnpm why vite`), so a workspace-level override was needed to force every transitive copy onto the patched line — deliberately stayed on the 6.x/3.x line rather than the latest 8.x/4.x majors (beta at the time) to keep the fix minimal |
-| DD-019 | `.github/workflows/ci.yml`'s `container-scan` job pins `aquasecurity/trivy-action@v0.29.0` (was `@0.29.0`, no `v` prefix) | The action's git tags are `v0.18.0`…`v0.36.0`; the un-prefixed ref didn't resolve to any tag, so `container-scan` failed at the "Getting action download info" step before Trivy ever ran — this was a broken CI job, not a real Trivy finding |
+| DD-019 | `.github/workflows/ci.yml`'s `container-scan` job pins `aquasecurity/trivy-action@v0.29.0` (was `@0.29.0`, no `v` prefix) | The action's git tags are `v0.18.0`…`v0.36.0`; the un-prefixed ref didn't resolve to any tag, so `container-scan` failed at the "Getting action download info" step before Trivy ever ran — this was a broken CI job, not a real Trivy finding. **Superseded by DD-021**: `v0.29.0` itself turned out to have a second, deeper problem |
 | DD-020 | Added `docs/{architecture,adr,research,hardware}/` and `packages/` as scaffolded-but-empty directories (each holding only a README stub); `design.md` itself stays whole and at the repo root, unsplit | User requested production-grade repo layout conventions (docs/ with topic subfolders, packages/ alongside apps/+services/). `design.md` is CLAUDE.md's single authoritative engineering-memory file (read before every request, append-only Development Log, §14 Repository Structure lives inside it) — splitting its 29 sections across the new folders would have replaced that workflow, not just reorganized files, so per explicit user confirmation it stays a single root file and the new folders are forward-looking scaffolding: promote content out of the relevant `design.md` section into `docs/*` only once that content outgrows a PRD section (see each folder's README for the specific handoff rule) |
+| DD-021 | `dependency-audit`'s `pip-audit` invocation now passes `--disable-pip` (in addition to the existing `--no-deps`); `container-scan` repinned from `aquasecurity/trivy-action@v0.29.0` to `@v0.36.0` | **pip-audit**: `--no-deps` alone does *not* skip `pip-audit`'s internal venv bootstrap — only `--disable-pip` does (allowed here because `uv export`'s output is already `--no-deps`/fully hashed). Without it, `pip-audit`'s `VirtualEnv(EnvBuilder(with_pip=True))` copies (doesn't symlink) the interpreter into a throwaway venv; uv's managed standalone CPython needs a sibling `lib/` dir next to the binary for its `$ORIGIN`-relative `libpython*.so`, so the copy fails to load it and the child process exits `127` with zero output (the error text itself is captured into `_call_new_python`'s `.output`, which the unhandled `CalledProcessError` traceback never prints — found only by reproducing locally with `strace` and manually replicating `_call_new_python`'s exact subprocess call to surface the suppressed stderr). A second, independent problem existed underneath: `pip-audit`'s dry-run `pip install` re-resolves against whatever Python actually runs it, and `services/ml`'s `uv export` hashes are locked to cp311 wheels only — under a different interpreter (attempted as part of a same-day, since-reverted `UV_PYTHON_PREFERENCE=only-system` workaround) pip rejected the hash-mismatched `scipy` wheel and fell back to a source build, which failed on a missing Fortran compiler. `--disable-pip` avoids both failure modes at once by never installing/resolving anything — it trusts the already-pinned, already-hashed export directly. **Trivy**: `v0.29.0`'s composite action internally pins `aquasecurity/setup-trivy@v0.2.2`, a tag since deleted upstream (confirmed via `git ls-remote --tags`: only `v0.2.6`+ remain) — `v0.36.0` pins that same internal dependency by commit SHA, immune to future upstream tag deletions |
 
 ---
 
@@ -890,6 +891,82 @@ Actions.
 **Recommended next task:** Re-run the `CI` workflow and verify all required checks pass, then
 continue with §24 Pending Tasks.
 
+### Entry 7 — Phase 1, M1–M2 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Entry 6's fix did not actually resolve the `Dependency audit` failure — the user
+reported "same error persists" with a fresh screenshot showing the identical `ensurepip` exit-127
+traceback on the commit containing Entry 6's change. Entry 6's diagnosis (a `-e .` editable-install
+line from `uv export`, fixed by adding `--no-emit-project`/`--no-deps`) was incomplete: `--no-deps`
+does not skip `pip-audit`'s internal venv bootstrap (only `--disable-pip` does — confirmed by
+reading `pip_audit/_dependency_source/requirement.py` directly), so the same `ensurepip` failure
+was always going to persist regardless of `--no-emit-project`. Root-caused for real this time by
+reproducing locally (`uv`/`uvx` 0.5.9 on the host, no CI needed): `strace -f` showed the venv's
+`python3.11` process `execve`-succeeding then immediately `exit_group(127)` with zero output;
+manually replicating `venv.EnvBuilder(with_pip=True).create()` in isolation (bypassing
+`check_output`'s captured-but-unprinted `.output`) surfaced the real error: `error while loading
+shared libraries: .../lib/libpython3.11.so.1.0: cannot open shared object file`. Confirmed via `ls`
+that the venv's `bin/python3.11` was a real copied file (not a symlink) missing its own `lib/`
+sibling — `EnvBuilder(with_pip=True)` defaults `symlinks=False`, and uv's managed CPython needs
+`$ORIGIN`-relative access to that sibling dir. A first attempted fix (`UV_PYTHON_PREFERENCE=
+only-system` to sidestep uv's relocatable build entirely) traded this bug for a second one: the
+runner's system Python has no `python3.11`, so `uv export` itself failed with "No interpreter found
+for Python ==3.11.*" when the env var scope leaked onto it; narrowing the scope to just the `uvx
+pip-audit` call fixed that, but then exposed a *third* issue — `services/ml`'s `uv export` hashes
+are locked to cp311 wheels only, so auditing under the system's cp312 Python made pip reject the
+hash-mismatched `scipy` wheel and fall back to a source build, which failed on a missing Fortran
+compiler (`gfortran`/`ifx`/etc. all absent). Abandoned that approach entirely once
+`pip_audit/_dependency_source/requirement.py` revealed `--disable-pip` as the actually-intended
+escape hatch for pre-resolved, fully-hashed input — it skips venv creation altogether, fixing all
+three problems at once. Separately, also caught that DD-019's `container-scan` fix (Entry 4) only
+addressed the missing `v` prefix on `aquasecurity/trivy-action@v0.29.0` — that specific release
+still failed with "Unable to resolve action `aquasecurity/setup-trivy@v0.2.2`", a *second*, deeper
+bug: `v0.29.0`'s own composite action pins its internal `setup-trivy` dependency to a tag that's
+since been deleted upstream. Repinned to `v0.36.0`, which pins that same internal dependency by
+commit SHA instead of a mutable tag.
+
+**Files modified:** `.github/workflows/ci.yml` — `dependency-audit`'s `pip-audit` step now runs
+`uvx pip-audit --no-deps --disable-pip -r /tmp/reqs.txt` (added `--disable-pip`); `container-scan`
+repinned `aquasecurity/trivy-action@v0.29.0` → `@v0.36.0`.
+
+**Files created/deleted:** none.
+
+**Reason for change:** See DD-021 (supersedes DD-019's trivy fix and corrects Entry 6's incomplete
+`pip-audit` diagnosis).
+
+**Architectural decisions:** DD-021 (§15).
+
+**What was actually verified, end to end, in this session:**
+- Reproduced the exact CI failure locally (same `uv`/`uvx` version, 0.5.9) without needing a CI run,
+  via `strace -f -e trace=execve,exit_group` and by manually invoking
+  `venv.EnvBuilder(with_pip=True).create()` in isolation to surface the suppressed shared-library
+  error.
+- Confirmed all four services (`api`, `copilot`, `edge`, `ml`) pass `uv export ... | uvx pip-audit
+  --no-deps --disable-pip -r ...` with exit code 0, in seconds rather than minutes (no venv/pip
+  bootstrap at all) — `ml`'s `torch==2.13.0+cpu` is correctly skipped with a "not found on PyPI"
+  notice (expected: local-version identifiers from the CPU wheel index, DD-011, aren't on PyPI) and
+  does not fail the job.
+- Confirmed `aquasecurity/setup-trivy`'s real tags (`v0.2.6`, `v0.3.0`, `v0.3.1` — `v0.2.2` is gone)
+  via `git ls-remote --tags`, and that `trivy-action@v0.36.0`'s `action.yaml` pins that dependency by
+  commit SHA and still accepts every input this workflow passes (`scan-type`, `scan-ref`,
+  `severity`, `exit-code`, `skip-dirs`).
+- Validated `.github/workflows/ci.yml`'s full YAML syntax via `yaml.safe_load` after editing.
+- Not verified in this session: an actual Trivy scan run, or the `dependency-audit` job on the real
+  GitHub Actions runner image specifically (as opposed to this local reproduction) — recommend one
+  more CI run to close this out for real this time.
+
+**Remaining work:** Push/re-run CI to confirm `Dependency audit`, `Trivy filesystem scan`, and `CI
+status` all go green together — this is now the third attempt, so treat "green in the Actions UI"
+as the actual completion signal, not local reproduction alone. Then hardware procurement and pilot
+machine identification (§24), then Phase 2.
+
+**Known issues:** None newly introduced. Note for future debugging in this repo: `pip-audit`
+failures that show a bare `CalledProcessError` with no subprocess output are almost certainly
+swallowing real diagnostic text in `.output`/`.stderr` — reproduce locally and catch the exception
+directly rather than trusting the traceback shown in CI logs.
+
+**Recommended next task:** Confirm the CI run is fully green, then hardware procurement and pilot
+machine identification (§24), then Phase 2.
+
 ---
 
 ## 29. Current Repository State
@@ -919,13 +996,17 @@ continue with §24 Pending Tasks.
 - **Dashboard on `vite@6.4.3`/`vitest@3.2.7`** (Entry 4, DD-018), with a `pnpm-workspace.yaml`
   `overrides.vite` pin so vitest's internal `vite-node`/`@vitest/mocker` can't drag in the older,
   vulnerable `vite@5.4.21` transitively — `pnpm audit --audit-level=high` clean as of this entry.
-- **Dependency-audit CI Python path hardened** (Entry 6): each service now exports requirements with
-  `uv export --no-emit-project`, and `pip-audit` runs with `--no-deps` against that lock-resolved
-  list, avoiding the runner-specific `ensurepip` virtualenv bootstrap failure seen in run
-  `29141265728` / job `86514811281` and avoiding local editable-package hash/install failures.
-- **`container-scan` (Trivy) CI job ref fixed** (Entry 4, DD-019): `aquasecurity/trivy-action` now
-  pinned to the real tag `v0.29.0` (was missing the `v` prefix, so the job failed before Trivy ever
-  ran); not yet re-confirmed on a fresh CI run (see Entry 4 Remaining work).
+- **Dependency-audit `pip-audit` step fixed for real** (Entry 7, DD-021, supersedes Entry 6):
+  `--disable-pip` skips `pip-audit`'s internal venv bootstrap entirely, avoiding the `ensurepip`
+  exit-127 failure (uv's managed CPython's `$ORIGIN`-relative shared lib breaks when
+  `EnvBuilder(with_pip=True)` copies rather than symlinks it) and a second, independent failure in
+  `services/ml` (hash-locked-to-cp311 `scipy` rejected under a different interpreter). Entry 6's
+  earlier `--no-emit-project`/`--no-deps`-only fix did not actually resolve this — verified all four
+  services pass locally with `--disable-pip`, not yet re-confirmed on GitHub Actions itself.
+- **`container-scan` (Trivy) CI job ref fixed for real** (Entry 7, DD-021, supersedes DD-019):
+  `aquasecurity/trivy-action` repinned `v0.29.0` → `v0.36.0` — `v0.29.0` had the correct `v` prefix
+  but its own composite action pinned an internal `setup-trivy` dependency to a tag since deleted
+  upstream; `v0.36.0` pins that same dependency by commit SHA. Not yet re-confirmed on a fresh CI run.
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
