@@ -148,22 +148,23 @@ jobs:
         with:
           version: "0.5.9"
       - name: pip-audit (per service)
-        env:
-          # pip-audit builds a throwaway venv via `EnvBuilder(with_pip=True)`
-          # without `symlinks=True`, so it *copies* the interpreter instead of
-          # symlinking it. uv's managed standalone CPython relies on a
-          # $ORIGIN-relative RPATH to find its own libpython*.so, which breaks
-          # once copied elsewhere (silent exit 127, no output — the error is
-          # merged into `_call_new_python`'s captured output, which the
-          # unhandled CalledProcessError never prints). The system Python on
-          # the runner doesn't have this relocatable-build layout, so force
-          # uv to use it here instead of downloading/managing its own.
-          UV_PYTHON_PREFERENCE: only-system
         run: |
           for d in services/*/; do
             echo "::group::pip-audit $d"
             uv export --project "$d" --no-dev --no-emit-project --format requirements-txt > /tmp/reqs.txt
-            uvx pip-audit --no-deps -r /tmp/reqs.txt
+            # --disable-pip skips pip-audit's fallback dry-run `pip install` into a
+            # throwaway venv entirely (only allowed when the input is already fully
+            # resolved via --no-deps or per-package hashes, both true of a `uv export`
+            # requirements file). Without it, that throwaway venv creation
+            # (`EnvBuilder(with_pip=True)`, no `symlinks=True`) copies rather than
+            # symlinks the interpreter; uv's managed standalone CPython needs a
+            # $ORIGIN-relative sibling lib/ dir to load libpython*.so, which a bare
+            # copy doesn't have, so it dies silently with exit 127. Separately, the
+            # dry-run install also re-resolves against whatever Python runs `pip`,
+            # which broke `scipy`/`torch` in services/ml since `uv export`'s hashes
+            # are locked to cp311 wheels only. --disable-pip avoids both failure
+            # modes by never installing anything — it just reads the pins directly.
+            uvx pip-audit --no-deps --disable-pip -r /tmp/reqs.txt
             echo "::endgroup::"
           done
 
@@ -172,7 +173,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@v0.29.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
