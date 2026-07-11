@@ -46,9 +46,11 @@ services:
         condition: service_healthy
     environment:
       SENSOR_PROVIDER: ${SENSOR_PROVIDER:-simulated}
+      ASSET_ID: ${ASSET_ID:-motor_01}
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       DATABASE_PATH: /data/digital_cousin.sqlite3
+      PUBLISH_INTERVAL_SECONDS: "5"
     volumes:
       - sqlite-data:/data
     develop:

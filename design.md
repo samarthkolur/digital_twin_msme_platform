@@ -360,7 +360,11 @@ The following limitations are explicitly acknowledged to maintain academic integ
 │       └── nginx.conf
 ├── services/
 │   ├── edge/               Sensor acquisition + feature extraction (FastAPI)
-│   │   └── src/edge/providers/   base.py (interface), simulated.py, hardware.py
+│   │   └── src/edge/
+│   │       ├── providers/        base.py (interface), simulated.py, hardware.py (real
+│   │       │                     ADXL345/DS18B20 decode, DD-022)
+│   │       ├── storage.py        RawReadingStore — SQLite `raw_readings` (DD-023, DD-024)
+│   │       └── main.py            MQTT publish loop (DD-025) + FastAPI lifespan
 │   ├── api/                REST API over the digital-twin state object (FastAPI)
 │   ├── copilot/             Retrieval-grounded NL copilot (FastAPI)
 │   └── ml/                  Offline training pipeline (Isolation Forest, 1D conv autoencoder)
@@ -424,6 +428,10 @@ FastAPI services; ml is an on-demand training job).
 | DD-019 | `.github/workflows/ci.yml`'s `container-scan` job pins `aquasecurity/trivy-action@v0.29.0` (was `@0.29.0`, no `v` prefix) | The action's git tags are `v0.18.0`…`v0.36.0`; the un-prefixed ref didn't resolve to any tag, so `container-scan` failed at the "Getting action download info" step before Trivy ever ran — this was a broken CI job, not a real Trivy finding. **Superseded by DD-021**: `v0.29.0` itself turned out to have a second, deeper problem |
 | DD-020 | Added `docs/{architecture,adr,research,hardware}/` and `packages/` as scaffolded-but-empty directories (each holding only a README stub); `design.md` itself stays whole and at the repo root, unsplit | User requested production-grade repo layout conventions (docs/ with topic subfolders, packages/ alongside apps/+services/). `design.md` is CLAUDE.md's single authoritative engineering-memory file (read before every request, append-only Development Log, §14 Repository Structure lives inside it) — splitting its 29 sections across the new folders would have replaced that workflow, not just reorganized files, so per explicit user confirmation it stays a single root file and the new folders are forward-looking scaffolding: promote content out of the relevant `design.md` section into `docs/*` only once that content outgrows a PRD section (see each folder's README for the specific handoff rule) |
 | DD-021 | `dependency-audit`'s `pip-audit` invocation now passes `--disable-pip` (in addition to the existing `--no-deps`); `container-scan` repinned from `aquasecurity/trivy-action@v0.29.0` to `@v0.36.0` | **pip-audit**: `--no-deps` alone does *not* skip `pip-audit`'s internal venv bootstrap — only `--disable-pip` does (allowed here because `uv export`'s output is already `--no-deps`/fully hashed). Without it, `pip-audit`'s `VirtualEnv(EnvBuilder(with_pip=True))` copies (doesn't symlink) the interpreter into a throwaway venv; uv's managed standalone CPython needs a sibling `lib/` dir next to the binary for its `$ORIGIN`-relative `libpython*.so`, so the copy fails to load it and the child process exits `127` with zero output (the error text itself is captured into `_call_new_python`'s `.output`, which the unhandled `CalledProcessError` traceback never prints — found only by reproducing locally with `strace` and manually replicating `_call_new_python`'s exact subprocess call to surface the suppressed stderr). A second, independent problem existed underneath: `pip-audit`'s dry-run `pip install` re-resolves against whatever Python actually runs it, and `services/ml`'s `uv export` hashes are locked to cp311 wheels only — under a different interpreter (attempted as part of a same-day, since-reverted `UV_PYTHON_PREFERENCE=only-system` workaround) pip rejected the hash-mismatched `scipy` wheel and fell back to a source build, which failed on a missing Fortran compiler. `--disable-pip` avoids both failure modes at once by never installing/resolving anything — it trusts the already-pinned, already-hashed export directly. **Trivy**: `v0.29.0`'s composite action internally pins `aquasecurity/setup-trivy@v0.2.2`, a tag since deleted upstream (confirmed via `git ls-remote --tags`: only `v0.2.6`+ remain) — `v0.36.0` pins that same internal dependency by commit SHA, immune to future upstream tag deletions |
+| DD-022 | `HardwareSensorProvider.read()` samples a 64-reading burst (~80ms at 800 Hz) per call rather than a continuous 3,200 Hz stream, and computes `vibration_rms_g` as the RMS of the AC-coupled signal (window mean, dominated by the ~1g gravity offset at the mount orientation, subtracted before RMS) | §6.2's "up to 3,200 Hz" is the ADXL345's hardware ceiling, not a claim that a synchronous Python polling loop inside an async FastAPI process can sustain that rate without real-time buffering/jitter design — that's a real-time-systems problem best tuned empirically against actual hardware (not yet procured, §24), so Phase 2 scope is a technically-correct register decode (real 3.9 mg/LSB scale factor, real POWER_CTL/DATA_FORMAT/BW_RATE init sequence) proven with a burst, not a production-tuned continuous stream — matching §24's own task granularity ("ADXL345 SPI register decoding" is a separate, narrower Phase 2 item from "state object sync", which stays Phase 3) |
+| DD-023 | Edge's MQTT publish loop and new `RawReadingStore` (SQLite `raw_readings` table: `asset_id`, `ts`, `vibration_rms_g`, `temperature_c`) are deliberately a separate, narrower schema from the full digital-twin state object in §6.0 (`anomaly_score`, `health_index`, `model_confidence`, `alert_level`) | Those ML-derived fields don't exist until Phase 4 (models) and Phase 3 (state sync + `api` read endpoints); logging exactly what the sensor read now, without inventing placeholder values for fields nothing populates yet, keeps `raw_readings` an honest record rather than a preview of a schema that will actually land in Phase 3 |
+| DD-024 | `RawReadingStore`/`DATABASE_PATH` default to SQLite's `:memory:` when the env var is unset (docker-compose always sets an explicit file path) | Lets unit tests and bare `uv run` exercise the real `sqlite3` code path (schema creation, inserts) with no file-system side effects and no directory-existence assumptions, while production/dev-container runs get real persistence via the existing `sqlite-data` volume |
+| DD-025 | New MQTT topic scheme `digital-cousin/<asset_id>/raw`, separate from any future `.../state` topic Phase 3 might add | Keeps the raw sensor feed (Phase 2, this work) and the eventual full-state broadcast (Phase 3, once `anomaly_score`/`health_index` exist) on distinct topics so a Phase-3 consumer can't accidentally treat an unenriched raw reading as a complete state object |
 
 ---
 
@@ -453,8 +461,10 @@ No dependency has been added without a corresponding line item above and, where 
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
 | `SENSOR_PROVIDER` | `edge` | `simulated` (dev) / `hardware` (prod, via `docker-compose.prod.yml`) | Selects the `SensorProvider` implementation (DD-003) |
+| `ASSET_ID` | `edge` | `motor_01` | Pilot-machine identifier (§6.0 state model); used as the MQTT topic segment (DD-025) and `raw_readings.asset_id` |
 | `MQTT_HOST` / `MQTT_PORT` | `edge` | `mosquitto` / `1883` | MQTT broker address on the Docker network |
-| `DATABASE_PATH` | `edge`, `api` | `/data/digital_cousin.sqlite3` | SQLite file inside the shared `sqlite-data` named volume |
+| `PUBLISH_INTERVAL_SECONDS` | `edge` | `5` | How often the publish loop reads the active provider and logs/publishes a reading (DD-023) |
+| `DATABASE_PATH` | `edge`, `api` | `/data/digital_cousin.sqlite3` | SQLite file inside the shared `sqlite-data` named volume; defaults to `:memory:` if unset (DD-024) |
 | `COPILOT_LLM_MODE` | `copilot` | `local` | `local` = TinyLlama/llama.cpp (no secrets); `api` = Anthropic/OpenAI fallback |
 | `API_URL` | `copilot` | `http://api:8000` | Internal Docker-network address of the REST API |
 | `VITE_API_URL`, `VITE_COPILOT_URL` | `dashboard` | `http://localhost:8000`, `http://localhost:8001` | Browser-facing URLs (host-mapped ports, not container-internal) |
@@ -527,36 +537,51 @@ follow-up (§26 Future Improvements) once there's a real pilot machine to deploy
 
 ## 21. Current Phase
 
-**Phase 1: Research & setup (M1–M2)** — per the delivery plan (§10). This engineering-foundation
-build is the "development environment configured" deliverable of Phase 1.
+**Phase 2: IoT data pipeline (M2–M3)** — per the delivery plan (§10). Phase 1's only remaining
+items (hardware procurement, pilot machine identification) are physical/non-code tasks that don't
+block starting Phase 2's software work against the `simulated` provider; they're tracked below and
+gate the *hardware* provider's real-world validation, not Phase 2's code.
 
 ## 22. Current Milestone
 
-Development environment configured (Phase 1 deliverable). Outstanding within this milestone:
-hardware procurement and pilot machine identification (tracked in §24 Pending Tasks) are the only
-Phase 1 items not addressed by this engineering-foundation work.
+Sensor firmware + MQTT publish pipeline + SQLite raw-reading storage (Phase 2 deliverables per
+§10). Implemented and verified end-to-end (live `docker compose up` against the real Mosquitto
+broker, not just unit tests) against the `simulated` provider. Outstanding within this milestone:
+real-hardware validation of `HardwareSensorProvider` and "validation against a reference sensor"
+(§10) both require the still-unprocured ADXL345/DS18B20/Pi (§24).
 
 ## 23. Completed Milestones
 
-- **Engineering foundation established** (this work, logical time 2026-07-11): Docker-first dev
-  environment (`docker compose watch`), polyglot pnpm+uv monorepo, strict TS + ESLint flat config +
-  Prettier, ruff + mypy strict per Python service, Husky/lint-staged/commitlint, GitHub Actions CI
+- **Engineering foundation established** (logical time 2026-07-11): Docker-first dev environment
+  (`docker compose watch`), polyglot pnpm+uv monorepo, strict TS + ESLint flat config + Prettier,
+  ruff + mypy strict per Python service, Husky/lint-staged/commitlint, GitHub Actions CI
   (lint/typecheck/test/build/security matrixed across 4 Python services + dashboard), CodeQL,
   Dependabot, `scripts/bootstrap.sh` onboarding, VS Code workspace config, and skeleton services
   (`edge`, `api`, `copilot`, `ml`, `dashboard`) each with a working health check and passing tests.
+- **Phase 2 IoT data pipeline (software)** (this work, logical time 2026-07-11): real ADXL345
+  register decoding + DS18B20 read in `HardwareSensorProvider` (DD-022); `RawReadingStore` SQLite
+  persistence (DD-023, DD-024); an MQTT publish loop wired into `edge`'s FastAPI lifespan
+  (DD-025); `ASSET_ID`/`PUBLISH_INTERVAL_SECONDS` config. Verified live end-to-end against the real
+  Mosquitto broker and a persistent SQLite file, not just against mocks (see Entry 8).
 
 ## 24. Pending Tasks
 
 - [ ] Procure hardware: ADXL345/MPU6050, DS18B20, Raspberry Pi 4 (§6.2 BOM)
 - [ ] Identify and gain access to the pilot machine (real MSME asset or lab equivalent, §11 risk)
-- [ ] Implement ADXL345 SPI register decoding in `HardwareSensorProvider.read()` (Phase 2)
-- [ ] Implement the state object sync loop (edge → SQLite) and the `api` read endpoints (Phase 3)
+- [ ] Validate `HardwareSensorProvider` against real hardware and a reference sensor (§10 Phase 2;
+      blocked on the two items above) — the register decode (DD-022) is written to the ADXL345
+      datasheet but has only been exercised against a mocked SPI bus, never a real device
+- [ ] Tune the vibration sampling loop's real-time behavior (buffering, jitter, sample count/rate)
+      once real hardware is available — DD-022 deliberately scoped Phase 2 to a correct but modest
+      64-sample burst rather than a continuous 3,200 Hz stream, which needs empirical tuning
+- [ ] Implement the full state object sync (edge → SQLite `state` table with `anomaly_score`/
+      `health_index`/etc.) and the `api` read endpoints (Phase 3) — distinct from Phase 2's
+      `raw_readings` table (DD-023)
 - [ ] Download/preprocess CWRU + IMS datasets into `services/ml` (Phase 4)
 - [ ] Implement Isolation Forest + 1D conv autoencoder training in `services/ml/src/ml/pipeline.py` (Phase 4)
 - [ ] Implement copilot retrieval + prompt construction + rule-based fallback (Phase 5)
 - [ ] Build out the real dashboard (health gauge, trends, alerts, ROI estimator) (Phase 3/5)
 - [ ] Add a multi-arch (`linux/arm64`) image publish workflow once ready to deploy to a real Pi (§26)
-- [ ] Generate and commit `pnpm-lock.yaml` and each service's `uv.lock` (first `bootstrap.sh` / `uv sync` run)
 
 ## 25. Known Issues
 
@@ -967,6 +992,66 @@ directly rather than trusting the traceback shown in CI logs.
 **Recommended next task:** Confirm the CI run is fully green, then hardware procurement and pilot
 machine identification (§24), then Phase 2.
 
+### Entry 8 — Phase 2, M2–M3 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Started Phase 2 (IoT data pipeline, §10) — implemented the sensor-firmware and
+MQTT/SQLite parts of `services/edge` that don't require physical hardware in hand. User asked to
+"start Phase 1"; clarified via a question that they meant the next coding phase (Phase 2 per
+design.md's own numbering, since Phase 1 per §21-24 was already engineering-foundation-complete
+with only physical procurement left, which isn't a code task).
+
+**Files created:** `services/edge/src/edge/storage.py` (`RawReadingStore`), `services/edge/tests/
+test_hardware_provider.py`, `services/edge/tests/test_storage.py`, `services/edge/tests/
+test_publish_loop.py`.
+
+**Files modified:**
+- `services/edge/src/edge/providers/hardware.py` — replaced the `NotImplementedError` stub with a
+  real ADXL345 SPI register decoder (DATA_FORMAT/BW_RATE/POWER_CTL init, 3.9 mg/LSB full-res scale,
+  DD-022) and a real DS18B20 read via `w1thermsensor`.
+- `services/edge/src/edge/main.py` — added `read_and_publish_once`/`publish_loop`, wired into the
+  FastAPI lifespan alongside a `paho-mqtt` client (`connect_async`+`loop_start`, so a
+  not-yet-reachable or absent broker never crashes startup — verified by the fact unit tests pass
+  with zero broker running) and a `RawReadingStore`. New module-level config: `ASSET_ID`,
+  `MQTT_TOPIC`, `PUBLISH_INTERVAL_SECONDS`.
+- `docker-compose.yml` — `edge.environment` gained `ASSET_ID` and `PUBLISH_INTERVAL_SECONDS`.
+- `.env.example` — documented `ASSET_ID`.
+
+**Files deleted:** none.
+
+**Reason for change:** See DD-022 (register decode + sampling scope), DD-023 (raw vs. full state
+schema), DD-024 (`:memory:` test default), DD-025 (MQTT topic scheme).
+
+**Architectural decisions:** DD-022 through DD-025 (§15).
+
+**What was actually verified, end to end, in this session:**
+- `uvx ruff@0.8.0 check`/`format --check`, `uv run mypy .` (strict, 0 errors), `uv run pytest` — all
+  green; 8 tests, 96.58% coverage (gate is 70%). Caught and fixed one real mypy error along the way:
+  `paho.mqtt.client.CallbackAPIVersion` is an implicit re-export under `--strict`'s
+  `--no-implicit-reexport`, fixed by importing it from its actual home, `paho.mqtt.enums`.
+- `HardwareSensorProvider` tested against a hand-built fake `spidev`/`w1thermsensor` (injected via
+  `sys.modules`, since the real `hardware` extra is Pi-only and not installed here): asserted the
+  exact three register writes (`DATA_FORMAT`, `BW_RATE`, `POWER_CTL`) and hand-verified the RMS math
+  against a deterministic alternating two-value sample sequence (expected `0.0195`, matched).
+- `docker compose build edge` succeeds; brought up `mosquitto`+`edge` for real via `docker compose
+  up -d`, both reached `healthy`. Subscribed to `digital-cousin/motor_01/raw` from inside the
+  mosquitto container and captured a real published message. Queried `/data/digital_cousin.sqlite3`
+  from inside the running edge container directly and confirmed 9 rows had accumulated at the
+  expected 5-second cadence (`PUBLISH_INTERVAL_SECONDS`). Checked `docker compose stop`'s logs and
+  confirmed a clean lifespan shutdown (task cancellation, no hang, no traceback) rather than an
+  assumed-clean teardown.
+- Not verified in this session (blocked on hardware, tracked in §24): anything against a real
+  ADXL345/DS18B20 — `HardwareSensorProvider` is only proven against a mocked SPI bus.
+
+**Remaining work:** See §24 — hardware procurement/pilot machine identification (unblocks real-
+hardware validation of this session's work), then the rest of Phase 2/3 (state object sync, `api`
+read endpoints).
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Hardware procurement and pilot machine identification (§24) to unblock
+validating `HardwareSensorProvider` for real; in parallel, Phase 3's state-object sync and `api`
+read endpoints can proceed against the `simulated` provider.
+
 ---
 
 ## 29. Current Repository State
@@ -982,9 +1067,11 @@ machine identification (§24), then Phase 2.
 - **Lockfiles committed:** `pnpm-lock.yaml` and `services/{edge,api,copilot,ml}/uv.lock`, generated
   and verified during Entry 2's validation pass — `docker compose build`/`bootstrap.sh` use these
   with `--frozen-lockfile`/`uv sync`, not floating resolution.
-- **No application features implemented** — every service exposes a working `/health` endpoint and
-  passing tests, but the state object sync, sensor register decoding, ML training, and copilot
-  retrieval logic are all still Pending Tasks (§24), by design (this was a foundation-only task).
+- **First application feature implemented: `services/edge`'s Phase 2 IoT pipeline** (Entry 8, DD-022
+  through DD-025) — real ADXL345/DS18B20 sensor decoding, an MQTT publish loop, and SQLite raw-
+  reading storage, verified live against a real Mosquitto broker. Still not implemented: the state
+  object sync, ML training, and copilot retrieval logic — all still Pending Tasks (§24). `api`,
+  `copilot`, `ml`, and `dashboard` still only expose their foundation-phase skeletons.
 - **Engineering foundation is runtime-verified, not just statically reviewed** (Entry 2): `docker
   compose watch` hot reload, health-gated startup ordering, the prod Compose overlay, and the Husky
   → toolbox → lint-staged/commitlint hook chain were all exercised live, and two real bugs surfaced
@@ -1011,3 +1098,7 @@ machine identification (§24), then Phase 2.
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
   memory file. §14 above reflects the current full tree.
+- **Phase 2 (IoT data pipeline) started** (Entry 8): `services/edge` now has a real
+  `HardwareSensorProvider` (untested against actual hardware — mocked-SPI only, §24), an MQTT
+  publish loop, and SQLite raw-reading persistence — all runtime-verified via a live `docker compose
+  up` against the real Mosquitto broker, not just unit tests. Current phase is now Phase 2 (§21).
