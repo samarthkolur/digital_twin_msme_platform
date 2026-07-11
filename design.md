@@ -356,6 +356,9 @@ The following limitations are explicitly acknowledged to maintain academic integ
 ├── apps/
 │   └── dashboard/          React + Vite + TS dashboard (offline-first SPA)
 │       ├── src/
+│       │   ├── api.ts            fetchCurrentState + state types (DD-028, polls api's
+│       │   │                     GET /state/current)
+│       │   └── App.tsx            renders live state; loading/no-data/error/ready (§10 Phase 3)
 │       ├── Dockerfile      multi-stage: base → deps → dev / build → prod (nginx)
 │       └── nginx.conf
 ├── services/
@@ -438,6 +441,9 @@ FastAPI services; ml is an on-demand training job).
 | DD-024 | `RawReadingStore`/`DATABASE_PATH` default to SQLite's `:memory:` when the env var is unset (docker-compose always sets an explicit file path) | Lets unit tests and bare `uv run` exercise the real `sqlite3` code path (schema creation, inserts) with no file-system side effects and no directory-existence assumptions, while production/dev-container runs get real persistence via the existing `sqlite-data` volume |
 | DD-025 | New MQTT topic scheme `digital-cousin/<asset_id>/raw`, separate from any future `.../state` topic Phase 3 might add | Keeps the raw sensor feed (Phase 2, this work) and the eventual full-state broadcast (Phase 3, once `anomaly_score`/`health_index` exist) on distinct topics so a Phase-3 consumer can't accidentally treat an unenriched raw reading as a complete state object |
 | DD-026 | Phase 3's `state_history` SQLite schema and its row→JSON mapping are independently duplicated in `services/edge/src/edge/storage.py` (writer) and `services/api/src/api/storage.py` (reader) — no shared package. `api`'s copy also runs `CREATE TABLE IF NOT EXISTS` so it can boot before `edge` ever writes a row | Per DD-002/§14, `edge` and `api` are independent `uv` projects with no shared Python package (packages/ is TS-only, DD-013/DD-020); the alternative (a first shared internal Python package) is more machinery than one ~15-line schema justifies today. Both copies live under the same `# schema duplicated, keep in sync` comment so future edits aren't done in only one place. `/state/*` returns HTTP 404 (not `null`) when nothing has been recorded yet, matching REST convention for "resource doesn't exist" |
+| DD-027 | `services/api`'s FastAPI app adds `CORSMiddleware` with `allow_origins=["*"]` (GET only) | The dashboard fetches `api` directly from the browser, which is a *different origin* (`localhost:5173` dev / the Pi's nginx port in prod) — without CORS headers the browser silently blocks the fetch even though `curl`/server-to-server calls work fine (confirmed missing before this change, then present after: `curl -H "Origin: ..."` showed no `access-control-allow-origin` header pre-fix). Wildcard is a deliberate choice mirroring DD-016's reasoning: single-tenant, offline-first, LAN-local device, no untrusted origins ever reach it, no sensitive/authenticated data served — tracked as Technical Debt (§26) to revisit if this API is ever exposed beyond localhost/LAN |
+| DD-028 | `apps/dashboard/src/api.ts`'s `DigitalTwinState`/`VibrationFeatures` TypeScript interfaces are a third independent copy of the §6.0 state-object shape (alongside edge's and api's Python copies, DD-026) | No shared schema mechanism crosses the Python/TypeScript language boundary either; documented here so a future schema change (e.g. Phase 4 populating `anomaly_score`) is remembered as a 3-way, not 2-way, update |
+| DD-029 | `docker-compose.prod.yml`'s dashboard healthcheck probes `http://127.0.0.1:8080/healthz`, not `http://localhost:8080/healthz` | Found during a full re-verification audit (Entry 11): the prod dashboard container's `/etc/hosts` resolves `localhost` to `::1` (IPv6) only, but nginx's `listen 8080;` is IPv4-only, so busybox `wget` (no multi-address fallback, unlike `curl`) failed the healthcheck with "Connection refused" on every single run — the container was silently reporting unhealthy on every real prod deployment despite serving traffic correctly (confirmed: host-side `curl http://localhost:8080/` returned 200 the whole time, masking the problem, since curl retries the next resolved address on connection failure and the host-to-container path goes through Docker's NAT rather than the container's own `/etc/hosts`). `127.0.0.1` sidesteps the DNS ambiguity entirely regardless of which HTTP client resolves it |
 
 ---
 
@@ -551,12 +557,14 @@ open below and gate the *hardware* provider specifically, not the software phase
 
 ## 22. Current Milestone
 
-State object definition finalized, real-time sensor-to-state sync, and a REST API exposing current
-and historical state (§10 Phase 3 deliverables) — implemented and verified end-to-end (live `docker
-compose up`, real HTTP requests against `api`, real MQTT subscription) against the `simulated`
-provider. Outstanding within this milestone: the dashboard skeleton rendering live state (§10) is
-not yet built (still the placeholder React scaffold), and `anomaly_score`/`health_index`/
-`model_confidence`/`alert_level` stay `null` until Phase 4's ML pipeline exists to populate them.
+All four of §10 Phase 3's deliverables are now done: state object definition finalized, real-time
+sensor-to-state sync, a REST API exposing current and historical state, and a dashboard skeleton
+rendering live data — implemented and verified end-to-end (live `docker compose up`, real HTTP
+requests against `api`, real MQTT subscription, a real headless-Chrome render of the dashboard
+against the live stack) against the `simulated` provider. `anomaly_score`/`health_index`/
+`model_confidence`/`alert_level` stay `null` until Phase 4's ML pipeline exists to populate them —
+Phase 3 is otherwise complete; the *full* dashboard (health gauge, trends, alerts, ROI estimator) is
+Phase 5 scope per §10, not Phase 3's.
 
 ## 23. Completed Milestones
 
@@ -581,6 +589,13 @@ not yet built (still the placeholder React scaffold), and `anomaly_score`/`healt
   schema-synced `StateReader`. Verified live: real HTTP requests against a running `api` container
   returning real `edge`-written rows, a 404 for an asset that never reported, and a real MQTT
   subscription to the new state topic.
+- **Dashboard skeleton rendering live state** (this work, logical time 2026-07-11): `apps/dashboard`
+  now polls `api`'s `GET /state/current` every 5s and renders real vibration/temperature data,
+  with distinct loading/no-data/error/ready states, instead of the static placeholder. Added
+  `CORSMiddleware` to `api` (DD-027) — the dashboard/api cross-origin fetch was silently blocked by
+  the browser without it, caught by checking response headers with `curl -H "Origin: ..."` before
+  assuming the integration worked. Verified live in an actual browser (headless Chrome against the
+  running `docker compose` stack), not just via unit tests with a mocked `fetch`.
 
 ## 24. Pending Tasks
 
@@ -592,9 +607,9 @@ not yet built (still the placeholder React scaffold), and `anomaly_score`/`healt
 - [ ] Tune the vibration sampling loop's real-time behavior (buffering, jitter, sample count/rate)
       once real hardware is available — DD-022 deliberately scoped Phase 2 to a correct but modest
       64-sample burst rather than a continuous 3,200 Hz stream, which needs empirical tuning
-- [ ] Build out the real dashboard (health gauge, trends, alerts, ROI estimator) rendering live state
-      from `api`'s new `/state/current`/`/state/history` endpoints (Phase 3/5) — still the
-      placeholder scaffold
+- [ ] Build out the *full* dashboard (health gauge, historical trend charts using
+      `/state/history`, alert module, ROI estimator) — Phase 5 scope per §10; the Phase 3 skeleton
+      (live `/state/current` polling, done this entry) intentionally stops short of this
 - [ ] Download/preprocess CWRU + IMS datasets into `services/ml` (Phase 4)
 - [ ] Implement Isolation Forest + 1D conv autoencoder training in `services/ml/src/ml/pipeline.py`,
       and have `edge` populate `anomaly_score`/`health_index`/`model_confidence`/`alert_level` in
@@ -607,14 +622,16 @@ not yet built (still the placeholder React scaffold), and `anomaly_score`/`healt
 
 - Mosquitto broker has `allow_anonymous true` and no TLS (DD-016) — acceptable only while the
   broker is unreachable outside the Docker network / Pi-local network.
-- `HardwareSensorProvider.read()` raises `NotImplementedError` — the hardware path is not yet
-  functional (by design, this phase is tooling-only; see §24).
+- `HardwareSensorProvider.read()` is fully implemented (DD-022) but has only ever run against a
+  mocked SPI bus in tests — never real ADXL345/DS18B20 hardware (procurement still pending, §24).
 - No `uv.lock` / `pnpm-lock.yaml` committed as of this entry — generated and committed as part of
   validating this foundation (see §28 Development Log for the exact commands run).
 
 ## 26. Technical Debt
 
 - Mosquitto authentication/TLS deferred until the broker is ever exposed beyond localhost/LAN.
+- `api`'s CORS policy allows all origins (DD-027) — same localhost/LAN-only reasoning as the
+  Mosquitto item above; revisit together if this API is ever exposed beyond localhost/LAN.
 - No CI image-publishing workflow yet (builds are verify-only); needed before real Pi deployment.
 - `docker-compose.prod.yml` device passthrough (`/dev/spidev0.0`, `/dev/gpiomem`) is hard-coded to
   the default SPI bus/device — revisit if the retrofit protocol (§11) ends up needing configurable
@@ -1144,12 +1161,154 @@ out Phase 3's last software deliverable), or start Phase 4 dataset work in `serv
 unblocked; hardware procurement/pilot machine identification (§24) remains the standing blocker for
 everything hardware-specific.
 
+### Entry 10 — Phase 3, M3–M4 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Wired the dashboard to `api`'s new `/state/*` endpoints, closing out Phase 3's
+last remaining deliverable (§10: "dashboard skeleton rendering live data"). Continuing the branch-
+per-feature workflow from Entry 9: PR #32 (Phase 3 backend) had been merged to `main` by the user in
+the interim, so this work started from a fresh `feature/dashboard-live-state` branch off the
+updated `main`, deleting the now-merged `feature/phase-3-state-sync-api` branch first.
+
+**Files created:** `apps/dashboard/src/api.ts` (`fetchCurrentState`, `DigitalTwinState`/
+`VibrationFeatures` types, DD-028), `apps/dashboard/src/api.test.ts`.
+
+**Files modified:**
+- `apps/dashboard/src/App.tsx` — replaced the static placeholder with a polling component (5s
+  interval, matching `PUBLISH_INTERVAL_SECONDS`'s default) with four explicit states (loading/
+  no-data/error/ready), rendering the real vibration/temperature fields and an honest note that
+  anomaly detection isn't available yet when `health_index` is `null`.
+- `apps/dashboard/src/App.test.tsx` — updated for the new polling/rendering behavior (mocks
+  `./api`'s `fetchCurrentState`, preserving the real `NoStateError` via `importOriginal`).
+- `apps/dashboard/src/vite-env.d.ts` — typed `ImportMetaEnv.VITE_API_URL`.
+- `services/api/src/api/main.py` — added `CORSMiddleware` (`allow_origins=["*"]`, GET only,
+  DD-027) — **a real bug caught before it shipped**, not a preemptive addition: the dashboard/api
+  fetch is cross-origin (`localhost:5173` → `localhost:8000`), and `curl -H "Origin: ..."` against
+  the running `api` container showed no `access-control-allow-origin` header before this change,
+  which would have silently broken in any real browser despite every `curl`-based check up to this
+  point succeeding.
+
+**Files deleted:** none. (Local branch `feature/phase-3-state-sync-api` deleted after confirming
+`git merge-base --is-ancestor` showed it fully merged into `main`.)
+
+**Reason for change:** See DD-027 (CORS), DD-028 (third schema-duplication location).
+
+**Architectural decisions:** DD-027, DD-028 (§15).
+
+**What was actually verified, end to end, in this session:**
+- `pnpm run lint`/`typecheck`/`test` (containerized toolbox) all green — caught and fixed two real
+  ESLint errors along the way (`@typescript-eslint/no-empty-function` on a deliberately-never-
+  resolving test Promise, fixed with a targeted disable comment; `@typescript-eslint/
+  restrict-template-expressions` on a numeric template literal, fixed with `String(...)`). 7 tests,
+  100%/88.88%/100%/100% coverage (gate 60%).
+- `docker compose build dashboard`, then brought up `mosquitto`+`edge`+`api`+`dashboard` for real.
+- **Caught the missing-CORS bug before declaring success**: `curl -i -H "Origin: http://
+  localhost:5173" http://localhost:8000/state/current` showed no CORS header pre-fix (would pass in
+  any non-browser check, silently fail in a real browser) — added `CORSMiddleware`, rebuilt/
+  redeployed `api`, re-ran the same `curl` and confirmed `access-control-allow-origin: *` present.
+- **Verified in an actual browser, not just curl or unit tests**: `google-chrome --headless=new
+  --virtual-time-budget=8000 --dump-dom http://localhost:5173/` against the live stack — the
+  dumped DOM showed the real rendered state (`motor_01`, real vibration/temperature values, the
+  "anomaly detection isn't available yet" message), proving the cross-origin fetch actually
+  succeeds end-to-end in a real browser engine, which a mocked-fetch unit test or a `curl` check
+  alone cannot prove.
+- Checked both `dashboard` and `api` container logs for errors post-verification — clean.
+
+**Remaining work:** See §24. Hardware procurement/pilot machine identification remains the standing
+blocker for real-hardware validation. Phase 3 is now fully done; next phases are independent of
+each other and of the hardware blocker: Phase 4 (CWRU/IMS dataset work + Isolation Forest/
+autoencoder training in `services/ml`), Phase 5's full dashboard (gauges/trends/alerts/ROI) and
+copilot retrieval.
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Start Phase 4 (`services/ml` dataset preprocessing) — it's the next
+sequential phase per §10 and is fully unblocked (no hardware dependency, `simulated` provider
+already produces plausible vibration data for pipeline development).
+
+### Entry 11 — Phase 3, M3–M4 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Full re-verification audit of everything built through Phase 3, at the user's
+explicit request ("check everything properly is everything until phase 3 done perfectly"). Not a
+new feature — re-ran every quality gate and every runtime check across the whole repo, including
+combinations not previously exercised together (all 5 services at once; the prod Compose overlay
+rebuilt for real rather than reusing a stale dev-target image). Found and fixed one real,
+previously-undetected bug.
+
+**Files modified:** `docker-compose.prod.yml` (dashboard healthcheck `localhost` → `127.0.0.1`,
+DD-029).
+
+**Files created/deleted:** none.
+
+**Reason for change:** See DD-029.
+
+**Architectural decisions:** DD-029 (§15).
+
+**What was actually checked, and what it found:**
+- **Local quality gates, containerized (matching CI's exact invocation), for every service, not
+  just the ones touched this session:** `make lint`, `make format-check`, `make typecheck`, `make
+  test`, `make knip` — all green. Along the way, discovered and fixed an unrelated *environmental*
+  problem (not a code bug): earlier sessions had run `uv sync`/`mypy`/`pytest` directly on the host
+  for speed, leaving host-created `.venv` directories that the containerized toolbox then failed to
+  replace (`Directory not empty`). Removed them (confirmed gitignored first) and reran `make
+  typecheck` clean from a fresh container-created venv — this is what a contributor following
+  DD-001 ("Docker-first, no host installs") would actually experience, so it needed to work via the
+  toolbox specifically, not just via host `uv run`.
+- **Every Docker image and target CI builds** (`apps/dashboard` dev+prod, `services/{edge,api,
+  copilot}` prod, `services/ml`, `docker/tools.Dockerfile`) — all 7 build clean via plain `docker
+  build`, independent of `docker compose build`'s caching.
+- **hadolint** against all six Dockerfiles directly (`docker run --rm -i hadolint/hadolint`) — zero
+  output on all six, independent of CI.
+- **Security scans, run locally rather than trusted from a prior CI green:** `gitleaks detect` (18
+  commits, no leaks), `pip-audit --disable-pip` for all four Python services (clean; `torch`
+  correctly skipped as before), `pnpm audit --audit-level=high` (clean), and a real `trivy fs` scan
+  of the whole repo (0 vulnerabilities, 0 secrets across all five lockfiles) — this was the first
+  time Trivy was actually run in this project rather than only relied upon via CI.
+- **`docker compose config` validation** for both the base file and the `-f ... -f
+  docker-compose.prod.yml` merge.
+- **All five services running simultaneously for the first time** (previous sessions had only
+  tested subsets: edge+mosquitto, edge+api+mosquitto, edge+api+dashboard+mosquitto) — `copilot` had
+  never been part of a live multi-service check before. All five reached `healthy`; hit every
+  `/health` endpoint (correcting an initial mistake of curling the same host-mapped port twice
+  under the mislabeled belief one of them was `edge`'s — `edge` has no host-mapped port by design,
+  confirmed its actual health via `docker exec`), confirmed `copilot`'s `API_URL` wiring reaches
+  `api` over the Docker network, and re-confirmed `/state/current`/`/state/history` and the
+  dashboard's live render (headless Chrome) all still work with the full stack up, not just pairs.
+  All five containers' logs checked for errors/warnings — clean.
+- **The prod Compose overlay, rebuilt for real this time**: an initial `docker compose -f ... -f
+  docker-compose.prod.yml up -d` (without `--build`) silently reused the cached *dev*-target image
+  (`vite --host 0.0.0.0` on port 5173), not the prod nginx image — a testing-methodology mistake
+  caught by noticing the running command didn't match what `target: prod` should produce. Re-ran
+  with `--build`, which surfaced DD-029's real bug: the prod dashboard's healthcheck was failing
+  every single time (`FailingStreak` accumulating, `wget: Connection refused`) even though the
+  container was serving traffic correctly on the host side. Diagnosed via `getent hosts localhost`
+  (returned only `::1`), `wget http://127.0.0.1:8080` (succeeded) vs. `wget http://localhost:8080`
+  (failed) run directly inside the container, and inspection of the nginx config (`listen 8080;`,
+  IPv4-only). Fixed, rebuilt, and confirmed all four prod-overlay services (dashboard included)
+  reach `healthy` and `curl http://localhost:8080/healthz` still returns `ok`.
+- **Confirmed CI is actually green on GitHub, not just assumed from local checks:** `gh run list`
+  showed the `CI`/`CodeQL` workflows completed `success` on both the `feature/phase-3-state-sync-
+  api` PR and on `main` after its merge. Explicitly noted: `feature/dashboard-live-state` (this
+  session's other branch, not touched further here) has no open PR yet, so CI has never run against
+  it — only local checks (all green, see Entry 10) have validated that work so far.
+
+**Remaining work:** See §24 — unchanged; this entry found and fixed one bug but didn't add new
+scope. Recommend opening a PR for `feature/dashboard-live-state` so CI validates it for real,
+matching the standard this audit just re-confirmed for everything merged so far.
+
+**Known issues:** DD-029's bug is fixed as of this entry, not outstanding. No issues discovered by
+this audit remain open.
+
+**Recommended next task:** Open the PR for `feature/dashboard-live-state` (or merge it) so CI
+covers it; then Phase 4 (`services/ml` dataset work), unchanged from Entry 10's recommendation.
+
 ---
 
 ## 29. Current Repository State
 
-- **Branch:** `feature/phase-3-state-sync-api` (branched off `main`, which tracks `origin/main`) —
-  per Entry 9, new feature work now happens on branches rather than directly on `main`.
+- **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
+  not run against this branch's commit (Entry 10); everything on it is validated locally only, per
+  Entry 11's audit. `main` tracks `origin/main` and is confirmed CI-green (Entry 11).
+  `feature/phase-3-state-sync-api` (PR #32) was merged and deleted before this branch was created.
 - **Remote:** `https://github.com/samarthkolur/digital_twin_msme_platform.git`.
 - **Commit history:** single "first commit" (CLAUDE.md, design.md, initial `.gitattributes`/
   `.gitignore`) predates this entry; this engineering-foundation work is the first substantial
@@ -1160,13 +1319,15 @@ everything hardware-specific.
 - **Lockfiles committed:** `pnpm-lock.yaml` and `services/{edge,api,copilot,ml}/uv.lock`, generated
   and verified during Entry 2's validation pass — `docker compose build`/`bootstrap.sh` use these
   with `--frozen-lockfile`/`uv sync`, not floating resolution.
-- **`edge` and `api` now have real application logic** (Entry 8 Phase 2, Entry 9 Phase 3, DD-022
-  through DD-026): real ADXL345/DS18B20 sensor decoding + full vibration feature extraction, an MQTT
-  publish loop (raw + state topics), SQLite `raw_readings`/`state_history` persistence, and `api`'s
-  `GET /state/current`/`GET /state/history` — all verified live against a real Mosquitto broker and
-  real HTTP requests. Still not implemented: ML training and copilot retrieval logic (Phase 4/5,
-  §24); `anomaly_score`/`health_index`/`model_confidence`/`alert_level` stay `null` until then.
-  `copilot`, `ml`, and `dashboard` still only expose their foundation-phase skeletons.
+- **`edge`, `api`, and `dashboard` now have real application logic** (Entry 8 Phase 2, Entries 9-10
+  Phase 3, DD-022 through DD-028): real ADXL345/DS18B20 sensor decoding + full vibration feature
+  extraction, an MQTT publish loop (raw + state topics), SQLite `raw_readings`/`state_history`
+  persistence, `api`'s `GET /state/current`/`GET /state/history` (with CORS enabled, DD-027), and a
+  dashboard that polls and renders that live state — all verified live (real Mosquitto broker, real
+  HTTP requests, a real headless-Chrome render). Still not implemented: ML training and copilot
+  retrieval logic (Phase 4/5, §24); `anomaly_score`/`health_index`/`model_confidence`/`alert_level`
+  stay `null` until then. `copilot` and `ml` still only expose their foundation-phase skeletons.
+  Phase 3 (§10) is now fully complete.
 - **Engineering foundation is runtime-verified, not just statically reviewed** (Entry 2): `docker
   compose watch` hot reload, health-gated startup ordering, the prod Compose overlay, and the Husky
   → toolbox → lint-staged/commitlint hook chain were all exercised live, and two real bugs surfaced
@@ -1184,15 +1345,26 @@ everything hardware-specific.
   `EnvBuilder(with_pip=True)` copies rather than symlinks it) and a second, independent failure in
   `services/ml` (hash-locked-to-cp311 `scipy` rejected under a different interpreter). Entry 6's
   earlier `--no-emit-project`/`--no-deps`-only fix did not actually resolve this — verified all four
-  services pass locally with `--disable-pip`, not yet re-confirmed on GitHub Actions itself.
+  services pass locally with `--disable-pip`, **and confirmed green on GitHub Actions itself**
+  (Entry 11: `gh run list` shows `CI`/`CodeQL` both `success` on `main` after PR #32's merge).
 - **`container-scan` (Trivy) CI job ref fixed for real** (Entry 7, DD-021, supersedes DD-019):
   `aquasecurity/trivy-action` repinned `v0.29.0` → `v0.36.0` — `v0.29.0` had the correct `v` prefix
   but its own composite action pinned an internal `setup-trivy` dependency to a tag since deleted
-  upstream; `v0.36.0` pins that same dependency by commit SHA. Not yet re-confirmed on a fresh CI run.
+  upstream; `v0.36.0` pins that same dependency by commit SHA. **Confirmed on a real CI run** (Entry
+  11), not just locally.
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
   memory file. §14 above reflects the current full tree.
+- **Full Phase 1-3 re-verification audit completed, one real bug found and fixed** (Entry 11,
+  DD-029): the prod Compose overlay's dashboard healthcheck was silently failing on every real
+  deployment (`localhost` resolving to IPv6-only inside the container, nginx IPv4-only) despite the
+  container correctly serving traffic — invisible to every previous check because host-side `curl`
+  masked it. Every quality gate (lint/format/typecheck/test/knip), every Docker image/target build,
+  hadolint, gitleaks, pip-audit, pnpm audit, and a real Trivy scan were all re-run and confirmed
+  clean; all 5 services were run together for the first time (including `copilot`, previously never
+  exercised live); the prod overlay was rebuilt for real (`--build`, not a stale cached image) and
+  all 4 of its services confirmed healthy after the fix.
 - **Phase 2 (IoT data pipeline) started** (Entry 8): `services/edge` now has a real
   `HardwareSensorProvider` (untested against actual hardware — mocked-SPI only, §24), an MQTT
   publish loop, and SQLite raw-reading persistence — all runtime-verified via a live `docker compose

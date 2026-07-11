@@ -3,6 +3,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from api.storage import StateReader
@@ -44,6 +45,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="Digital Cousin API", lifespan=lifespan)
+
+# The dashboard (a separate origin: localhost:5173 in dev, the Pi's nginx port
+# in prod) fetches this API directly from the browser. This is a single-
+# tenant, offline-first, LAN-local device (no untrusted origins ever reach
+# it — same reasoning as DD-016's Mosquitto anonymous-access stance), so a
+# wildcard is a deliberate choice, not an oversight. Revisit if this API is
+# ever exposed beyond localhost/LAN (tracked as Technical Debt, §26).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
