@@ -3,8 +3,22 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
+class VibrationFeatures:
+    """Statistical vibration features (design.md §6.0 state model), computed
+    over a short sample window after removing the window's static (gravity)
+    offset — see `edge.features.compute_vibration_features`.
+    """
+
+    rms_g: float
+    kurtosis: float
+    crest_factor: float
+    peak_to_peak_g: float
+    sampling_hz: int
+
+
+@dataclass(frozen=True, slots=True)
 class SensorSample:
-    vibration_rms_g: float
+    vibration: VibrationFeatures
     temperature_c: float
 
 

@@ -1,7 +1,7 @@
 import struct
 import time
-from statistics import fmean
 
+from edge.features import compute_vibration_features
 from edge.providers.base import SensorProvider, SensorSample
 
 # ADXL345 register map (Analog Devices ADXL345 datasheet, Rev. G).
@@ -25,10 +25,11 @@ _SCALE_G_PER_LSB = 0.0039
 # Samples per `read()` call. A short burst rather than a continuous 3,200 Hz
 # stream: bit-banging that rate reliably from Python inside an async event
 # loop is a real-time-systems problem (buffering, jitter) best tuned against
-# real hardware, tracked as Phase 3 work. This burst is enough for a
-# first-order RMS estimate of the AC-coupled (gravity-removed) vibration.
+# real hardware, tracked as a Pending Task (§24). This burst is enough for a
+# first-order feature estimate of the AC-coupled (gravity-removed) vibration.
 _SAMPLE_COUNT = 64
-_SAMPLE_INTERVAL_S = 1.0 / 800
+_SAMPLING_HZ = 800
+_SAMPLE_INTERVAL_S = 1.0 / _SAMPLING_HZ
 
 
 class HardwareSensorProvider(SensorProvider):
@@ -65,15 +66,10 @@ class HardwareSensorProvider(SensorProvider):
             magnitudes_g.append((x_g**2 + y_g**2 + z_g**2) ** 0.5)
             time.sleep(_SAMPLE_INTERVAL_S)
 
-        # RMS of the AC-coupled signal: subtract the window mean (which is
-        # dominated by the ~1g gravity component at this mount orientation)
-        # before computing RMS, so the result reflects dynamic vibration
-        # rather than the static offset.
-        mean_g = fmean(magnitudes_g)
-        vibration_rms_g = fmean((m - mean_g) ** 2 for m in magnitudes_g) ** 0.5
+        vibration = compute_vibration_features(magnitudes_g, _SAMPLING_HZ)
 
         return SensorSample(
-            vibration_rms_g=round(vibration_rms_g, 4),
+            vibration=vibration,
             temperature_c=round(self._temp_sensor.get_temperature(), 2),
         )
 

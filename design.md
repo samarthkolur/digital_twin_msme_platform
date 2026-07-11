@@ -361,11 +361,16 @@ The following limitations are explicitly acknowledged to maintain academic integ
 ├── services/
 │   ├── edge/               Sensor acquisition + feature extraction (FastAPI)
 │   │   └── src/edge/
-│   │       ├── providers/        base.py (interface), simulated.py, hardware.py (real
-│   │       │                     ADXL345/DS18B20 decode, DD-022)
-│   │       ├── storage.py        RawReadingStore — SQLite `raw_readings` (DD-023, DD-024)
+│   │       ├── providers/        base.py (interface + VibrationFeatures), simulated.py,
+│   │       │                     hardware.py (real ADXL345/DS18B20 decode, DD-022)
+│   │       ├── features.py       compute_vibration_features — rms/kurtosis/crest/p2p (DD-022)
+│   │       ├── storage.py        RawReadingStore (DD-023, DD-024) + StateStore (DD-026)
 │   │       └── main.py            MQTT publish loop (DD-025) + FastAPI lifespan
 │   ├── api/                REST API over the digital-twin state object (FastAPI)
+│   │   └── src/api/
+│   │       ├── storage.py        StateReader — reads `state_history` (DD-026, schema
+│   │       │                     duplicated from edge/storage.py, no shared package)
+│   │       └── main.py            GET /state/current, GET /state/history
 │   ├── copilot/             Retrieval-grounded NL copilot (FastAPI)
 │   └── ml/                  Offline training pipeline (Isolation Forest, 1D conv autoencoder)
 ├── packages/                Shared TypeScript packages (empty — DD-013/DD-020: no 2nd TS
@@ -432,6 +437,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-023 | Edge's MQTT publish loop and new `RawReadingStore` (SQLite `raw_readings` table: `asset_id`, `ts`, `vibration_rms_g`, `temperature_c`) are deliberately a separate, narrower schema from the full digital-twin state object in §6.0 (`anomaly_score`, `health_index`, `model_confidence`, `alert_level`) | Those ML-derived fields don't exist until Phase 4 (models) and Phase 3 (state sync + `api` read endpoints); logging exactly what the sensor read now, without inventing placeholder values for fields nothing populates yet, keeps `raw_readings` an honest record rather than a preview of a schema that will actually land in Phase 3 |
 | DD-024 | `RawReadingStore`/`DATABASE_PATH` default to SQLite's `:memory:` when the env var is unset (docker-compose always sets an explicit file path) | Lets unit tests and bare `uv run` exercise the real `sqlite3` code path (schema creation, inserts) with no file-system side effects and no directory-existence assumptions, while production/dev-container runs get real persistence via the existing `sqlite-data` volume |
 | DD-025 | New MQTT topic scheme `digital-cousin/<asset_id>/raw`, separate from any future `.../state` topic Phase 3 might add | Keeps the raw sensor feed (Phase 2, this work) and the eventual full-state broadcast (Phase 3, once `anomaly_score`/`health_index` exist) on distinct topics so a Phase-3 consumer can't accidentally treat an unenriched raw reading as a complete state object |
+| DD-026 | Phase 3's `state_history` SQLite schema and its row→JSON mapping are independently duplicated in `services/edge/src/edge/storage.py` (writer) and `services/api/src/api/storage.py` (reader) — no shared package. `api`'s copy also runs `CREATE TABLE IF NOT EXISTS` so it can boot before `edge` ever writes a row | Per DD-002/§14, `edge` and `api` are independent `uv` projects with no shared Python package (packages/ is TS-only, DD-013/DD-020); the alternative (a first shared internal Python package) is more machinery than one ~15-line schema justifies today. Both copies live under the same `# schema duplicated, keep in sync` comment so future edits aren't done in only one place. `/state/*` returns HTTP 404 (not `null`) when nothing has been recorded yet, matching REST convention for "resource doesn't exist" |
 
 ---
 
@@ -461,7 +467,7 @@ No dependency has been added without a corresponding line item above and, where 
 | Variable | Where | Default | Purpose |
 |---|---|---|---|
 | `SENSOR_PROVIDER` | `edge` | `simulated` (dev) / `hardware` (prod, via `docker-compose.prod.yml`) | Selects the `SensorProvider` implementation (DD-003) |
-| `ASSET_ID` | `edge` | `motor_01` | Pilot-machine identifier (§6.0 state model); used as the MQTT topic segment (DD-025) and `raw_readings.asset_id` |
+| `ASSET_ID` | `edge`, `api` | `motor_01` | Pilot-machine identifier (§6.0 state model); MQTT topic segment (DD-025), `raw_readings`/`state_history` row key, and `api`'s default `/state/*` query param |
 | `MQTT_HOST` / `MQTT_PORT` | `edge` | `mosquitto` / `1883` | MQTT broker address on the Docker network |
 | `PUBLISH_INTERVAL_SECONDS` | `edge` | `5` | How often the publish loop reads the active provider and logs/publishes a reading (DD-023) |
 | `DATABASE_PATH` | `edge`, `api` | `/data/digital_cousin.sqlite3` | SQLite file inside the shared `sqlite-data` named volume; defaults to `:memory:` if unset (DD-024) |
@@ -537,18 +543,20 @@ follow-up (§26 Future Improvements) once there's a real pilot machine to deploy
 
 ## 21. Current Phase
 
-**Phase 2: IoT data pipeline (M2–M3)** — per the delivery plan (§10). Phase 1's only remaining
-items (hardware procurement, pilot machine identification) are physical/non-code tasks that don't
-block starting Phase 2's software work against the `simulated` provider; they're tracked below and
-gate the *hardware* provider's real-world validation, not Phase 2's code.
+**Phase 3: Digital twin core (M3–M4)** — per the delivery plan (§10). Phase 2's software work
+(sensor firmware, MQTT pipeline, raw SQLite logging) is done against the `simulated` provider;
+Phase 1/2's hardware-dependent items (procurement, pilot machine, real-hardware validation) remain
+open below and gate the *hardware* provider specifically, not the software phases built on top of
+`simulated`.
 
 ## 22. Current Milestone
 
-Sensor firmware + MQTT publish pipeline + SQLite raw-reading storage (Phase 2 deliverables per
-§10). Implemented and verified end-to-end (live `docker compose up` against the real Mosquitto
-broker, not just unit tests) against the `simulated` provider. Outstanding within this milestone:
-real-hardware validation of `HardwareSensorProvider` and "validation against a reference sensor"
-(§10) both require the still-unprocured ADXL345/DS18B20/Pi (§24).
+State object definition finalized, real-time sensor-to-state sync, and a REST API exposing current
+and historical state (§10 Phase 3 deliverables) — implemented and verified end-to-end (live `docker
+compose up`, real HTTP requests against `api`, real MQTT subscription) against the `simulated`
+provider. Outstanding within this milestone: the dashboard skeleton rendering live state (§10) is
+not yet built (still the placeholder React scaffold), and `anomaly_score`/`health_index`/
+`model_confidence`/`alert_level` stay `null` until Phase 4's ML pipeline exists to populate them.
 
 ## 23. Completed Milestones
 
@@ -558,11 +566,21 @@ real-hardware validation of `HardwareSensorProvider` and "validation against a r
   (lint/typecheck/test/build/security matrixed across 4 Python services + dashboard), CodeQL,
   Dependabot, `scripts/bootstrap.sh` onboarding, VS Code workspace config, and skeleton services
   (`edge`, `api`, `copilot`, `ml`, `dashboard`) each with a working health check and passing tests.
-- **Phase 2 IoT data pipeline (software)** (this work, logical time 2026-07-11): real ADXL345
-  register decoding + DS18B20 read in `HardwareSensorProvider` (DD-022); `RawReadingStore` SQLite
+- **Phase 2 IoT data pipeline (software)** (logical time 2026-07-11): real ADXL345 register
+  decoding + DS18B20 read in `HardwareSensorProvider` (DD-022); `RawReadingStore` SQLite
   persistence (DD-023, DD-024); an MQTT publish loop wired into `edge`'s FastAPI lifespan
   (DD-025); `ASSET_ID`/`PUBLISH_INTERVAL_SECONDS` config. Verified live end-to-end against the real
   Mosquitto broker and a persistent SQLite file, not just against mocks (see Entry 8).
+- **Phase 3 state object sync + `api` read endpoints** (this work, logical time 2026-07-11):
+  extended the sensor-provider interface with full vibration features (`rms_g`/`kurtosis`/
+  `crest_factor`/`peak_to_peak_g`/`sampling_hz`, DD-022/§6.0) via a shared
+  `compute_vibration_features` function; added `StateStore`'s `state_history` table (DD-026,
+  ML-derived fields `null` until Phase 4 per DD-023's principle) and a `digital-cousin/<asset_id>/
+  state` MQTT topic (DD-025) alongside the existing raw topic; implemented `api`'s `GET
+  /state/current` and `GET /state/history` reading the same table via a duplicated (DD-026),
+  schema-synced `StateReader`. Verified live: real HTTP requests against a running `api` container
+  returning real `edge`-written rows, a 404 for an asset that never reported, and a real MQTT
+  subscription to the new state topic.
 
 ## 24. Pending Tasks
 
@@ -574,13 +592,15 @@ real-hardware validation of `HardwareSensorProvider` and "validation against a r
 - [ ] Tune the vibration sampling loop's real-time behavior (buffering, jitter, sample count/rate)
       once real hardware is available — DD-022 deliberately scoped Phase 2 to a correct but modest
       64-sample burst rather than a continuous 3,200 Hz stream, which needs empirical tuning
-- [ ] Implement the full state object sync (edge → SQLite `state` table with `anomaly_score`/
-      `health_index`/etc.) and the `api` read endpoints (Phase 3) — distinct from Phase 2's
-      `raw_readings` table (DD-023)
+- [ ] Build out the real dashboard (health gauge, trends, alerts, ROI estimator) rendering live state
+      from `api`'s new `/state/current`/`/state/history` endpoints (Phase 3/5) — still the
+      placeholder scaffold
 - [ ] Download/preprocess CWRU + IMS datasets into `services/ml` (Phase 4)
-- [ ] Implement Isolation Forest + 1D conv autoencoder training in `services/ml/src/ml/pipeline.py` (Phase 4)
+- [ ] Implement Isolation Forest + 1D conv autoencoder training in `services/ml/src/ml/pipeline.py`,
+      and have `edge` populate `anomaly_score`/`health_index`/`model_confidence`/`alert_level` in
+      the state object once those models exist (Phase 4) — `state_history` already has the columns
+      (DD-026), just `null` for now
 - [ ] Implement copilot retrieval + prompt construction + rule-based fallback (Phase 5)
-- [ ] Build out the real dashboard (health gauge, trends, alerts, ROI estimator) (Phase 3/5)
 - [ ] Add a multi-arch (`linux/arm64`) image publish workflow once ready to deploy to a real Pi (§26)
 
 ## 25. Known Issues
@@ -1052,11 +1072,84 @@ read endpoints).
 validating `HardwareSensorProvider` for real; in parallel, Phase 3's state-object sync and `api`
 read endpoints can proceed against the `simulated` provider.
 
+### Entry 9 — Phase 3, M3–M4 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Phase 3's state object sync and `api` read endpoints (§10), continuing directly
+from Entry 8 since Phase 2's hardware-validation items remain blocked on procurement. Also: created
+branch `feature/phase-3-state-sync-api` for this work rather than committing to `main` directly, per
+user instruction to always branch for new feature work going forward.
+
+**Files created:** `services/edge/src/edge/features.py` (`compute_vibration_features`),
+`services/edge/tests/test_features.py`, `services/api/src/api/storage.py` (`StateReader`),
+`services/api/tests/test_state.py`.
+
+**Files modified:**
+- `services/edge/src/edge/providers/base.py` — added `VibrationFeatures`; `SensorSample.
+  vibration_rms_g` (flat) replaced with `SensorSample.vibration: VibrationFeatures` (nested).
+- `services/edge/src/edge/providers/simulated.py` — generates all four vibration features,
+  `peak_to_peak_g` derived from `crest_factor`/`rms_g` for internal consistency rather than
+  independently randomized.
+- `services/edge/src/edge/providers/hardware.py` — `read()` now calls
+  `compute_vibration_features` on its 64-sample burst instead of inlining an RMS-only calculation;
+  extracted `_SAMPLING_HZ = 800` as a named constant.
+- `services/edge/src/edge/storage.py` — added `StateStore` (`state_history` table, DD-026) and
+  `state_row_to_dict`, alongside the unchanged Phase 2 `RawReadingStore`.
+- `services/edge/src/edge/main.py` — `read_and_publish_once`/`publish_loop` now take both stores;
+  each cycle logs to `state_history` in addition to `raw_readings`, and publishes to a new
+  `digital-cousin/<asset_id>/state` MQTT topic (full state object) alongside the existing
+  `.../raw` topic (unchanged raw payload, DD-025).
+- `services/api/src/api/main.py` — replaced the bare health-only app with a FastAPI lifespan
+  managing a `StateReader`, plus `GET /state/current` (404 if nothing recorded) and `GET
+  /state/history?limit=N` (default 100, capped at 1000).
+- `docker-compose.yml` — `api.environment` gained `ASSET_ID` (matching `edge`'s existing default).
+- `services/edge/tests/test_hardware_provider.py`, `test_publish_loop.py`, `test_storage.py` —
+  updated for the nested `vibration` accessor and the dual-store/dual-topic publish flow.
+
+**Files deleted:** none.
+
+**Reason for change:** See DD-026 (state_history schema duplication + `api`'s idempotent
+`CREATE TABLE IF NOT EXISTS` for start-order independence) and DD-022 (feature math now shared via
+`edge.features` instead of inlined in `hardware.py`).
+
+**Architectural decisions:** DD-026 (§15).
+
+**What was actually verified, end to end, in this session:**
+- `uvx ruff@0.8.0 check`/`format --check`, `uv run mypy .` (strict, 0 errors) for both `edge` and
+  `api`. `uv run pytest`: edge 14 tests / 97.45% coverage, api 5 tests / 100% coverage (gate 70%
+  both).
+- `compute_vibration_features` cross-checked against a hand-computed 4-sample window (rms, kurtosis
+  = 7/3, crest_factor = sqrt(3), peak-to-peak all matched exactly) — decoupled from the ADXL345/SPI
+  mocking so the math itself has an independent, easy-to-verify test.
+- `docker compose build edge api` succeeded; brought up `mosquitto`+`edge`+`api` for real via
+  `docker compose up -d`, all three reached `healthy`.
+- Hit the running `api` container's real HTTP endpoints: `GET /state/current` returned a real
+  `edge`-written reading (200, correct `vibration` sub-object, `anomaly_score`/`health_index`/etc.
+  all `null` as designed); `GET /state/history?limit=3` returned 3 rows, most-recent-first, values
+  matching what was independently queried straight out of `/data/digital_cousin.sqlite3` inside the
+  edge container; `GET /state/current?asset_id=nonexistent_machine` returned a real 404.
+- Subscribed to `digital-cousin/motor_01/state` from inside the mosquitto container and captured a
+  real published full state object (not just the raw topic from Entry 8).
+- Checked `docker compose stop`/`logs` for both services and confirmed clean lifespan shutdown (no
+  hangs, no tracebacks) rather than assuming it from Entry 8's edge-only precedent.
+
+**Remaining work:** See §24. Hardware procurement/pilot machine identification still gates real
+`HardwareSensorProvider` validation. Next unblocked software work: the dashboard skeleton (Phase
+3/5, still a placeholder) rendering live data from the two new `api` endpoints, or starting Phase 4
+(CWRU/IMS dataset work in `services/ml`) — both are independent of the hardware-blocked items.
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Either wire the dashboard to `api`'s new `/state/*` endpoints (closes
+out Phase 3's last software deliverable), or start Phase 4 dataset work in `services/ml` — both
+unblocked; hardware procurement/pilot machine identification (§24) remains the standing blocker for
+everything hardware-specific.
+
 ---
 
 ## 29. Current Repository State
 
-- **Branch:** `main`, tracking `origin/main`.
+- **Branch:** `feature/phase-3-state-sync-api` (branched off `main`, which tracks `origin/main`) —
+  per Entry 9, new feature work now happens on branches rather than directly on `main`.
 - **Remote:** `https://github.com/samarthkolur/digital_twin_msme_platform.git`.
 - **Commit history:** single "first commit" (CLAUDE.md, design.md, initial `.gitattributes`/
   `.gitignore`) predates this entry; this engineering-foundation work is the first substantial
@@ -1067,10 +1160,12 @@ read endpoints can proceed against the `simulated` provider.
 - **Lockfiles committed:** `pnpm-lock.yaml` and `services/{edge,api,copilot,ml}/uv.lock`, generated
   and verified during Entry 2's validation pass — `docker compose build`/`bootstrap.sh` use these
   with `--frozen-lockfile`/`uv sync`, not floating resolution.
-- **First application feature implemented: `services/edge`'s Phase 2 IoT pipeline** (Entry 8, DD-022
-  through DD-025) — real ADXL345/DS18B20 sensor decoding, an MQTT publish loop, and SQLite raw-
-  reading storage, verified live against a real Mosquitto broker. Still not implemented: the state
-  object sync, ML training, and copilot retrieval logic — all still Pending Tasks (§24). `api`,
+- **`edge` and `api` now have real application logic** (Entry 8 Phase 2, Entry 9 Phase 3, DD-022
+  through DD-026): real ADXL345/DS18B20 sensor decoding + full vibration feature extraction, an MQTT
+  publish loop (raw + state topics), SQLite `raw_readings`/`state_history` persistence, and `api`'s
+  `GET /state/current`/`GET /state/history` — all verified live against a real Mosquitto broker and
+  real HTTP requests. Still not implemented: ML training and copilot retrieval logic (Phase 4/5,
+  §24); `anomaly_score`/`health_index`/`model_confidence`/`alert_level` stay `null` until then.
   `copilot`, `ml`, and `dashboard` still only expose their foundation-phase skeletons.
 - **Engineering foundation is runtime-verified, not just statically reviewed** (Entry 2): `docker
   compose watch` hot reload, health-gated startup ordering, the prod Compose overlay, and the Husky
@@ -1101,4 +1196,9 @@ read endpoints can proceed against the `simulated` provider.
 - **Phase 2 (IoT data pipeline) started** (Entry 8): `services/edge` now has a real
   `HardwareSensorProvider` (untested against actual hardware — mocked-SPI only, §24), an MQTT
   publish loop, and SQLite raw-reading persistence — all runtime-verified via a live `docker compose
-  up` against the real Mosquitto broker, not just unit tests. Current phase is now Phase 2 (§21).
+  up` against the real Mosquitto broker, not just unit tests.
+- **Phase 3 (state object sync + `api` read endpoints) done in software** (Entry 9, DD-026):
+  vibration feature extraction (kurtosis/crest-factor/peak-to-peak, not just RMS), `state_history`
+  SQLite table, a new MQTT state topic, and `api`'s two new endpoints — all runtime-verified via
+  real HTTP requests against a live `docker compose up` stack, not just unit tests. Current phase is
+  now Phase 3 (§21); remaining Phase 3 item is the dashboard rendering this live data (§24).
