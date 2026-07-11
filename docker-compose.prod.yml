@@ -50,7 +50,15 @@ services:
     ports: !override
       - "8080:8080"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      # 127.0.0.1, not localhost: this container's /etc/hosts resolves
+      # "localhost" to ::1 (IPv6) only, and nginx's `listen 8080;` is
+      # IPv4-only, so busybox wget (no multi-address fallback, unlike curl)
+      # fails outright on the IPv6 attempt — confirmed via `getent hosts
+      # localhost` returning only `::1` and `wget http://localhost:8080`
+      # failing with "Connection refused" while `wget http://127.0.0.1:8080`
+      # and host-side `curl http://localhost:8080` (masked by curl's
+      # fallback behavior) both succeeded.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
     deploy:
       resources:
         limits:

@@ -443,6 +443,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-026 | Phase 3's `state_history` SQLite schema and its row→JSON mapping are independently duplicated in `services/edge/src/edge/storage.py` (writer) and `services/api/src/api/storage.py` (reader) — no shared package. `api`'s copy also runs `CREATE TABLE IF NOT EXISTS` so it can boot before `edge` ever writes a row | Per DD-002/§14, `edge` and `api` are independent `uv` projects with no shared Python package (packages/ is TS-only, DD-013/DD-020); the alternative (a first shared internal Python package) is more machinery than one ~15-line schema justifies today. Both copies live under the same `# schema duplicated, keep in sync` comment so future edits aren't done in only one place. `/state/*` returns HTTP 404 (not `null`) when nothing has been recorded yet, matching REST convention for "resource doesn't exist" |
 | DD-027 | `services/api`'s FastAPI app adds `CORSMiddleware` with `allow_origins=["*"]` (GET only) | The dashboard fetches `api` directly from the browser, which is a *different origin* (`localhost:5173` dev / the Pi's nginx port in prod) — without CORS headers the browser silently blocks the fetch even though `curl`/server-to-server calls work fine (confirmed missing before this change, then present after: `curl -H "Origin: ..."` showed no `access-control-allow-origin` header pre-fix). Wildcard is a deliberate choice mirroring DD-016's reasoning: single-tenant, offline-first, LAN-local device, no untrusted origins ever reach it, no sensitive/authenticated data served — tracked as Technical Debt (§26) to revisit if this API is ever exposed beyond localhost/LAN |
 | DD-028 | `apps/dashboard/src/api.ts`'s `DigitalTwinState`/`VibrationFeatures` TypeScript interfaces are a third independent copy of the §6.0 state-object shape (alongside edge's and api's Python copies, DD-026) | No shared schema mechanism crosses the Python/TypeScript language boundary either; documented here so a future schema change (e.g. Phase 4 populating `anomaly_score`) is remembered as a 3-way, not 2-way, update |
+| DD-029 | `docker-compose.prod.yml`'s dashboard healthcheck probes `http://127.0.0.1:8080/healthz`, not `http://localhost:8080/healthz` | Found during a full re-verification audit (Entry 11): the prod dashboard container's `/etc/hosts` resolves `localhost` to `::1` (IPv6) only, but nginx's `listen 8080;` is IPv4-only, so busybox `wget` (no multi-address fallback, unlike `curl`) failed the healthcheck with "Connection refused" on every single run — the container was silently reporting unhealthy on every real prod deployment despite serving traffic correctly (confirmed: host-side `curl http://localhost:8080/` returned 200 the whole time, masking the problem, since curl retries the next resolved address on connection failure and the host-to-container path goes through Docker's NAT rather than the container's own `/etc/hosts`). `127.0.0.1` sidesteps the DNS ambiguity entirely regardless of which HTTP client resolves it |
 
 ---
 
@@ -1224,12 +1225,89 @@ copilot retrieval.
 sequential phase per §10 and is fully unblocked (no hardware dependency, `simulated` provider
 already produces plausible vibration data for pipeline development).
 
+### Entry 11 — Phase 3, M3–M4 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Full re-verification audit of everything built through Phase 3, at the user's
+explicit request ("check everything properly is everything until phase 3 done perfectly"). Not a
+new feature — re-ran every quality gate and every runtime check across the whole repo, including
+combinations not previously exercised together (all 5 services at once; the prod Compose overlay
+rebuilt for real rather than reusing a stale dev-target image). Found and fixed one real,
+previously-undetected bug.
+
+**Files modified:** `docker-compose.prod.yml` (dashboard healthcheck `localhost` → `127.0.0.1`,
+DD-029).
+
+**Files created/deleted:** none.
+
+**Reason for change:** See DD-029.
+
+**Architectural decisions:** DD-029 (§15).
+
+**What was actually checked, and what it found:**
+- **Local quality gates, containerized (matching CI's exact invocation), for every service, not
+  just the ones touched this session:** `make lint`, `make format-check`, `make typecheck`, `make
+  test`, `make knip` — all green. Along the way, discovered and fixed an unrelated *environmental*
+  problem (not a code bug): earlier sessions had run `uv sync`/`mypy`/`pytest` directly on the host
+  for speed, leaving host-created `.venv` directories that the containerized toolbox then failed to
+  replace (`Directory not empty`). Removed them (confirmed gitignored first) and reran `make
+  typecheck` clean from a fresh container-created venv — this is what a contributor following
+  DD-001 ("Docker-first, no host installs") would actually experience, so it needed to work via the
+  toolbox specifically, not just via host `uv run`.
+- **Every Docker image and target CI builds** (`apps/dashboard` dev+prod, `services/{edge,api,
+  copilot}` prod, `services/ml`, `docker/tools.Dockerfile`) — all 7 build clean via plain `docker
+  build`, independent of `docker compose build`'s caching.
+- **hadolint** against all six Dockerfiles directly (`docker run --rm -i hadolint/hadolint`) — zero
+  output on all six, independent of CI.
+- **Security scans, run locally rather than trusted from a prior CI green:** `gitleaks detect` (18
+  commits, no leaks), `pip-audit --disable-pip` for all four Python services (clean; `torch`
+  correctly skipped as before), `pnpm audit --audit-level=high` (clean), and a real `trivy fs` scan
+  of the whole repo (0 vulnerabilities, 0 secrets across all five lockfiles) — this was the first
+  time Trivy was actually run in this project rather than only relied upon via CI.
+- **`docker compose config` validation** for both the base file and the `-f ... -f
+  docker-compose.prod.yml` merge.
+- **All five services running simultaneously for the first time** (previous sessions had only
+  tested subsets: edge+mosquitto, edge+api+mosquitto, edge+api+dashboard+mosquitto) — `copilot` had
+  never been part of a live multi-service check before. All five reached `healthy`; hit every
+  `/health` endpoint (correcting an initial mistake of curling the same host-mapped port twice
+  under the mislabeled belief one of them was `edge`'s — `edge` has no host-mapped port by design,
+  confirmed its actual health via `docker exec`), confirmed `copilot`'s `API_URL` wiring reaches
+  `api` over the Docker network, and re-confirmed `/state/current`/`/state/history` and the
+  dashboard's live render (headless Chrome) all still work with the full stack up, not just pairs.
+  All five containers' logs checked for errors/warnings — clean.
+- **The prod Compose overlay, rebuilt for real this time**: an initial `docker compose -f ... -f
+  docker-compose.prod.yml up -d` (without `--build`) silently reused the cached *dev*-target image
+  (`vite --host 0.0.0.0` on port 5173), not the prod nginx image — a testing-methodology mistake
+  caught by noticing the running command didn't match what `target: prod` should produce. Re-ran
+  with `--build`, which surfaced DD-029's real bug: the prod dashboard's healthcheck was failing
+  every single time (`FailingStreak` accumulating, `wget: Connection refused`) even though the
+  container was serving traffic correctly on the host side. Diagnosed via `getent hosts localhost`
+  (returned only `::1`), `wget http://127.0.0.1:8080` (succeeded) vs. `wget http://localhost:8080`
+  (failed) run directly inside the container, and inspection of the nginx config (`listen 8080;`,
+  IPv4-only). Fixed, rebuilt, and confirmed all four prod-overlay services (dashboard included)
+  reach `healthy` and `curl http://localhost:8080/healthz` still returns `ok`.
+- **Confirmed CI is actually green on GitHub, not just assumed from local checks:** `gh run list`
+  showed the `CI`/`CodeQL` workflows completed `success` on both the `feature/phase-3-state-sync-
+  api` PR and on `main` after its merge. Explicitly noted: `feature/dashboard-live-state` (this
+  session's other branch, not touched further here) has no open PR yet, so CI has never run against
+  it — only local checks (all green, see Entry 10) have validated that work so far.
+
+**Remaining work:** See §24 — unchanged; this entry found and fixed one bug but didn't add new
+scope. Recommend opening a PR for `feature/dashboard-live-state` so CI validates it for real,
+matching the standard this audit just re-confirmed for everything merged so far.
+
+**Known issues:** DD-029's bug is fixed as of this entry, not outstanding. No issues discovered by
+this audit remain open.
+
+**Recommended next task:** Open the PR for `feature/dashboard-live-state` (or merge it) so CI
+covers it; then Phase 4 (`services/ml` dataset work), unchanged from Entry 10's recommendation.
+
 ---
 
 ## 29. Current Repository State
 
-- **Branch:** `feature/dashboard-live-state` (branched off `main`, which tracks `origin/main`) —
-  per Entry 9, new feature work happens on branches rather than directly on `main`.
+- **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
+  not run against this branch's commit (Entry 10); everything on it is validated locally only, per
+  Entry 11's audit. `main` tracks `origin/main` and is confirmed CI-green (Entry 11).
   `feature/phase-3-state-sync-api` (PR #32) was merged and deleted before this branch was created.
 - **Remote:** `https://github.com/samarthkolur/digital_twin_msme_platform.git`.
 - **Commit history:** single "first commit" (CLAUDE.md, design.md, initial `.gitattributes`/
@@ -1267,15 +1345,26 @@ already produces plausible vibration data for pipeline development).
   `EnvBuilder(with_pip=True)` copies rather than symlinks it) and a second, independent failure in
   `services/ml` (hash-locked-to-cp311 `scipy` rejected under a different interpreter). Entry 6's
   earlier `--no-emit-project`/`--no-deps`-only fix did not actually resolve this — verified all four
-  services pass locally with `--disable-pip`, not yet re-confirmed on GitHub Actions itself.
+  services pass locally with `--disable-pip`, **and confirmed green on GitHub Actions itself**
+  (Entry 11: `gh run list` shows `CI`/`CodeQL` both `success` on `main` after PR #32's merge).
 - **`container-scan` (Trivy) CI job ref fixed for real** (Entry 7, DD-021, supersedes DD-019):
   `aquasecurity/trivy-action` repinned `v0.29.0` → `v0.36.0` — `v0.29.0` had the correct `v` prefix
   but its own composite action pinned an internal `setup-trivy` dependency to a tag since deleted
-  upstream; `v0.36.0` pins that same dependency by commit SHA. Not yet re-confirmed on a fresh CI run.
+  upstream; `v0.36.0` pins that same dependency by commit SHA. **Confirmed on a real CI run** (Entry
+  11), not just locally.
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
   memory file. §14 above reflects the current full tree.
+- **Full Phase 1-3 re-verification audit completed, one real bug found and fixed** (Entry 11,
+  DD-029): the prod Compose overlay's dashboard healthcheck was silently failing on every real
+  deployment (`localhost` resolving to IPv6-only inside the container, nginx IPv4-only) despite the
+  container correctly serving traffic — invisible to every previous check because host-side `curl`
+  masked it. Every quality gate (lint/format/typecheck/test/knip), every Docker image/target build,
+  hadolint, gitleaks, pip-audit, pnpm audit, and a real Trivy scan were all re-run and confirmed
+  clean; all 5 services were run together for the first time (including `copilot`, previously never
+  exercised live); the prod overlay was rebuilt for real (`--build`, not a stale cached image) and
+  all 4 of its services confirmed healthy after the fix.
 - **Phase 2 (IoT data pipeline) started** (Entry 8): `services/edge` now has a real
   `HardwareSensorProvider` (untested against actual hardware — mocked-SPI only, §24), an MQTT
   publish loop, and SQLite raw-reading persistence — all runtime-verified via a live `docker compose
