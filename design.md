@@ -364,6 +364,13 @@ The following limitations are explicitly acknowledged to maintain academic integ
 │   ├── api/                REST API over the digital-twin state object (FastAPI)
 │   ├── copilot/             Retrieval-grounded NL copilot (FastAPI)
 │   └── ml/                  Offline training pipeline (Isolation Forest, 1D conv autoencoder)
+├── packages/                Shared TypeScript packages (empty — DD-013/DD-020: no 2nd TS
+│                            consumer yet; `pnpm-workspace.yaml` already globs `packages/*`)
+├── docs/
+│   ├── architecture/        Standalone architecture docs once a topic outgrows §6 (DD-020)
+│   ├── adr/                 Standalone ADRs promoted from the §15 DD-NNN table (DD-020)
+│   ├── research/            Research notes/evaluation write-ups beyond §8-9 (DD-020)
+│   └── hardware/            Wiring diagrams/datasheets/retrofit notes beyond §6.2 (DD-020)
 ├── infra/
 │   └── mosquitto/           Local MQTT broker config
 ├── docker/
@@ -413,6 +420,9 @@ FastAPI services; ml is an on-demand training job).
 | DD-015 | Security scanning uses free, self-hosted-in-CI tools only: gitleaks (secrets), Trivy (filesystem/dependency CVEs), hadolint (Dockerfile lint), CodeQL (SAST), `pnpm audit`/`pip-audit` (dependency advisories) | No paid service or external account required — appropriate for a capstone project budget (§2 cost barrier is a core design constraint of the product itself) |
 | DD-016 | Mosquitto runs with `allow_anonymous true` and no TLS | The broker is only ever reachable on the Docker-internal network / Pi-local network in the current design (§6.1); tracked as Technical Debt (§25) to revisit before any network-exposed deployment |
 | DD-017 | All six Dockerfiles suppress hadolint DL3008 (`# hadolint ignore=DL3008` above each `apt-get install`) instead of pinning exact Debian/Ubuntu package versions for `curl`/`ca-certificates`/`git`/`python3.11` | These packages come from each image's own base (`python:3.11-slim`, `node:22-slim`) and track that base's own security patches; hard-pinning a specific Debian package version would silently break (or go stale) every time the upstream base image is bumped, for no real reproducibility gain since the base image itself is not pinned to a digest |
+| DD-018 | `apps/dashboard`'s `vite`/`vitest`/`@vitest/coverage-v8` bumped from the 5.x/2.x line to `^6.4.3`/`^3.2.7`, plus a `pnpm-workspace.yaml` `overrides.vite: ^6.4.3` | `pnpm audit --audit-level=high` failed CI (GHSA-fx2h-pf6j-xcff `vite` high, GHSA-5xrq-8626-4rwp `vitest` moderate); bumping the direct `vite`/`vitest` deps alone left vitest's own `vite-node`/`@vitest/mocker` sub-dependencies resolving an independent, still-vulnerable `vite@5.4.21` (confirmed via `pnpm why vite`), so a workspace-level override was needed to force every transitive copy onto the patched line — deliberately stayed on the 6.x/3.x line rather than the latest 8.x/4.x majors (beta at the time) to keep the fix minimal |
+| DD-019 | `.github/workflows/ci.yml`'s `container-scan` job pins `aquasecurity/trivy-action@v0.29.0` (was `@0.29.0`, no `v` prefix) | The action's git tags are `v0.18.0`…`v0.36.0`; the un-prefixed ref didn't resolve to any tag, so `container-scan` failed at the "Getting action download info" step before Trivy ever ran — this was a broken CI job, not a real Trivy finding |
+| DD-020 | Added `docs/{architecture,adr,research,hardware}/` and `packages/` as scaffolded-but-empty directories (each holding only a README stub); `design.md` itself stays whole and at the repo root, unsplit | User requested production-grade repo layout conventions (docs/ with topic subfolders, packages/ alongside apps/+services/). `design.md` is CLAUDE.md's single authoritative engineering-memory file (read before every request, append-only Development Log, §14 Repository Structure lives inside it) — splitting its 29 sections across the new folders would have replaced that workflow, not just reorganized files, so per explicit user confirmation it stays a single root file and the new folders are forward-looking scaffolding: promote content out of the relevant `design.md` section into `docs/*` only once that content outgrows a PRD section (see each folder's README for the specific handoff rule) |
 
 ---
 
@@ -757,6 +767,98 @@ hadolint/hadolint`, not by observing a fresh Actions run.
 **Recommended next task:** Push/re-run CI to confirm the full `dockerfile-lint` matrix passes, then
 proceed to hardware procurement and pilot machine identification (§24), then Phase 2.
 
+### Entry 4 — Phase 1, M1–M2 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Fixed the two CI failures that surfaced on the next Actions run after Entry 3
+(confirmed via the CI UI that the full `dockerfile-lint` matrix now passes, closing Entry 3's
+Remaining work): `Dependency audit` (`pnpm audit --audit-level=high`) and `Trivy filesystem scan`
+(`container-scan` job), both of which were failing `CI status`'s aggregate gate.
+
+**Files modified:**
+- `apps/dashboard/package.json` — `vite` `^5.4.11` → `^6.4.3`, `vitest` `^2.1.5` → `^3.2.7`,
+  `@vitest/coverage-v8` `^2.1.5` → `^3.2.7`.
+- `pnpm-workspace.yaml` — added `overrides.vite: ^6.4.3` (see DD-018 for why the direct bump alone
+  was insufficient).
+- `pnpm-lock.yaml` — regenerated via `docker compose run --rm --no-deps toolbox pnpm install
+  --no-frozen-lockfile` (the toolbox container owns `node_modules` as root per DD-005's tooling
+  model, so the lockfile must be regenerated inside it, not from the host).
+- `.github/workflows/ci.yml` — `container-scan` step `uses: aquasecurity/trivy-action@0.29.0` →
+  `@v0.29.0`.
+
+**Files created/deleted:** none.
+
+**Reason for change:** See DD-018 (dependency audit: `vite` GHSA-fx2h-pf6j-xcff high,`vitest`
+GHSA-5xrq-8626-4rwp moderate, both fixed upstream) and DD-019 (Trivy: broken action ref, not a real
+scan finding — the job failed before Trivy executed).
+
+**Architectural decisions:** DD-018, DD-019 (§15).
+
+**What was actually verified, end to end, in this session:**
+- `pnpm why vite` showed two resolved copies (`5.4.21` via `vitest`'s internal `vite-node`/
+  `@vitest/mocker`, `6.4.3` direct) before the override; exactly one (`6.4.3`) after — the override
+  was necessary, not just the direct version bump.
+- `pnpm audit --audit-level=high` (containerized toolbox): "No known vulnerabilities found" after
+  the override, versus 4 vulnerabilities (1 high, 3 moderate) before it.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run test` (containerized toolbox) all green on the
+  bumped `vite@6.4.3`/`vitest@3.2.7` — dashboard test suite still 100% coverage, no ESLint or `tsc`
+  regressions from the major-version bumps.
+- `docker compose build dashboard` succeeds — the `dev`/`prod` image stages still build cleanly
+  against the new lockfile.
+- Confirmed `aquasecurity/trivy-action`'s real git tags (`v0.18.0`…`v0.36.0`, all `v`-prefixed) via
+  `git ls-remote --tags`, and that `v0.29.0`'s `action.yaml` still accepts every input this workflow
+  passes (`scan-type`, `scan-ref`, `severity`, `exit-code`, `skip-dirs`) — the fix is a pure ref
+  correction, not an inputs/behavior change.
+- Not verified in this session: an actual Trivy filesystem scan run (no local `trivy` binary
+  available; the fix was validated by confirming the action ref resolves and its inputs are
+  unchanged at that tag, not by executing a scan).
+
+**Remaining work:** Same as Entry 3 — hardware procurement and pilot machine identification (§24).
+Recommend one more CI run to confirm `Dependency audit`, `Trivy filesystem scan`, and `CI status`
+all go green together, since Trivy itself was not executed locally.
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Push/re-run CI to confirm the full pipeline is green, then proceed to
+hardware procurement and pilot machine identification (§24), then Phase 2.
+
+### Entry 5 — Phase 1, M1–M2 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Repository reorganization to production-grade layout conventions, per user
+request. Audited the full tracked file tree first (`git ls-files`) and found it already conformed:
+source code was already under `apps/`/`services/`, repo-level config was already at root, and no
+stray documentation existed outside `design.md` (no loose research notes, hardware datasheets, or
+ADR-shaped writeups anywhere in the repo). The only real gap was that `docs/` and `packages/`
+(the latter already referenced by `pnpm-workspace.yaml`'s `packages/*` glob per DD-013) didn't
+exist yet. Asked the user how far to take `design.md` specifically (leave whole at root / move
+whole / split its sections across the new `docs/` subfolders) since CLAUDE.md makes it the single
+authoritative, append-only engineering-memory file, not ordinary documentation — user chose to
+leave it whole and at root.
+
+**Files created:** `docs/architecture/README.md`, `docs/adr/README.md`, `docs/research/README.md`,
+`docs/hardware/README.md`, `packages/README.md` — each a short stub naming the folder's purpose,
+the `design.md` section it currently supersedes-from (until content actually outgrows that
+section), and the promotion rule for when to add real files there.
+
+**Files modified:** `README.md` (Repository layout section lists the new folders), `design.md`
+(§14 Repository Structure updated to match; this entry and DD-020 added).
+
+**Files deleted/moved:** none — this was additive scaffolding, not a file migration, since nothing
+in the existing tree was out of place.
+
+**Reason for change:** See DD-020.
+
+**Architectural decisions:** DD-020 (§15).
+
+**Remaining work:** Same as Entry 4. Additionally: `docs/adr/`, `docs/research/`, `docs/hardware/`,
+and `packages/` are intentionally empty scaffolding — no content was extracted from `design.md`.
+Populate them opportunistically per each folder's README (e.g. move DD-020 itself to a full ADR
+file if its rationale ever needs more than the one-line table entry).
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Push/re-run CI to confirm the full pipeline is green (unchanged from
+Entry 4), then hardware procurement and pilot machine identification (§24), then Phase 2.
+
 ---
 
 ## 29. Current Repository State
@@ -781,6 +883,15 @@ proceed to hardware procurement and pilot machine identification (§24), then Ph
   only by doing so (see Entry 2) — both fixed before this entry.
 - **All six Dockerfiles pass hadolint** (Entry 3, DD-017): verified locally via `docker run --rm -i
   hadolint/hadolint < <file>` for `apps/dashboard`, `services/{edge,api,copilot,ml}`, and
-  `docker/tools.Dockerfile` — zero output on all six. The first CI run's `dockerfile-lint` matrix job
-  had failed on `services/edge/Dockerfile` (DL3008); a fresh CI run has not yet been observed to
-  confirm the full matrix goes green (see Entry 3 Remaining work).
+  `docker/tools.Dockerfile` — zero output on all six, and confirmed green on the actual
+  `dockerfile-lint` CI matrix in the run following Entry 3 (closing that entry's Remaining work).
+- **Dashboard on `vite@6.4.3`/`vitest@3.2.7`** (Entry 4, DD-018), with a `pnpm-workspace.yaml`
+  `overrides.vite` pin so vitest's internal `vite-node`/`@vitest/mocker` can't drag in the older,
+  vulnerable `vite@5.4.21` transitively — `pnpm audit --audit-level=high` clean as of this entry.
+- **`container-scan` (Trivy) CI job ref fixed** (Entry 4, DD-019): `aquasecurity/trivy-action` now
+  pinned to the real tag `v0.29.0` (was missing the `v` prefix, so the job failed before Trivy ever
+  ran); not yet re-confirmed on a fresh CI run (see Entry 4 Remaining work).
+- **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
+  adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
+  of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
+  memory file. §14 above reflects the current full tree.

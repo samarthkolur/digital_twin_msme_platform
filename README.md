@@ -32,6 +32,11 @@ services/edge/      Sensor acquisition + feature extraction (Python, FastAPI)
 services/api/       REST API over the digital-twin state object (Python, FastAPI)
 services/copilot/   Retrieval-grounded NL copilot (Python, FastAPI)
 services/ml/        Offline training pipeline (Isolation Forest, 1D conv autoencoder)
+packages/           Shared TypeScript packages (empty until a 2nd TS consumer needs one, DD-013)
+docs/architecture/  Standalone architecture docs once a topic outgrows design.md §6
+docs/adr/           Standalone ADRs promoted from design.md §15's DD-NNN table
+docs/research/       Research notes / evaluation write-ups beyond design.md §8-9
+docs/hardware/       Wiring diagrams, datasheets, retrofit notes beyond design.md §6.2
 infra/mosquitto/    Local MQTT broker config
 docker/             Shared toolbox image (lint/format/typecheck/test, no host installs needed)
 scripts/            Bootstrap and validation tooling
