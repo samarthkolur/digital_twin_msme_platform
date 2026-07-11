@@ -412,6 +412,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-014 | Coverage gates are native to each test runner (vitest `coverage.thresholds`, `pytest --cov-fail-under`) rather than an external coverage SaaS | No third-party account/token needed to enforce a quality gate in CI |
 | DD-015 | Security scanning uses free, self-hosted-in-CI tools only: gitleaks (secrets), Trivy (filesystem/dependency CVEs), hadolint (Dockerfile lint), CodeQL (SAST), `pnpm audit`/`pip-audit` (dependency advisories) | No paid service or external account required — appropriate for a capstone project budget (§2 cost barrier is a core design constraint of the product itself) |
 | DD-016 | Mosquitto runs with `allow_anonymous true` and no TLS | The broker is only ever reachable on the Docker-internal network / Pi-local network in the current design (§6.1); tracked as Technical Debt (§25) to revisit before any network-exposed deployment |
+| DD-017 | All six Dockerfiles suppress hadolint DL3008 (`# hadolint ignore=DL3008` above each `apt-get install`) instead of pinning exact Debian/Ubuntu package versions for `curl`/`ca-certificates`/`git`/`python3.11` | These packages come from each image's own base (`python:3.11-slim`, `node:22-slim`) and track that base's own security patches; hard-pinning a specific Debian package version would silently break (or go stale) every time the upstream base image is bumped, for no real reproducibility gain since the base image itself is not pinned to a digest |
 
 ---
 
@@ -722,6 +723,40 @@ outstanding.
 **Recommended next task:** Unchanged from Entry 1 — hardware procurement and pilot machine
 identification (§24), then Phase 2.
 
+### Entry 3 — Phase 1, M1–M2 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Fixed the CI `dockerfile-lint` (hadolint) job failure surfaced on the first
+GitHub Actions run of the branch pushed in Entry 1/2. The matrix job for `services/edge/Dockerfile`
+failed (`failure-threshold: warning` in `.github/workflows/ci.yml`, so any warning fails the job);
+the other five matrix jobs showed as skipped/cancelled in the run, not actually passing, since
+GitHub Actions matrix jobs cancel siblings on a first failure by default (`fail-fast: true`). This
+is exactly the gap Entry 2 flagged as deferred/unverified ("hadolint was checked only via CI config,
+not run locally").
+
+**Files modified:** `services/edge/Dockerfile`, `services/api/Dockerfile`,
+`services/copilot/Dockerfile`, `apps/dashboard/Dockerfile`, `docker/tools.Dockerfile` — added
+`# hadolint ignore=DL3008` above each `apt-get install` line (DL3008: "Pin versions in apt get
+install"). `services/ml/Dockerfile` has no `apt-get install` and needed no change.
+
+**Files created/deleted:** none.
+
+**Reason for change:** See DD-017. Verified the fix by running `docker run --rm -i hadolint/hadolint
+< <file>` against all six Dockerfiles locally (hadolint was not installed as a host binary) — all
+six now produce zero output (no warnings or errors), matching what `failure-threshold: warning`
+requires to pass in CI.
+
+**Architectural decisions:** DD-017 (§15).
+
+**Remaining work:** Same as Entry 2 — hardware procurement and pilot machine identification (§24).
+Recommend re-running the full `dockerfile-lint` matrix in CI (push or re-run the workflow) to
+confirm all six jobs go green together, since this session validated locally via `docker run
+hadolint/hadolint`, not by observing a fresh Actions run.
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Push/re-run CI to confirm the full `dockerfile-lint` matrix passes, then
+proceed to hardware procurement and pilot machine identification (§24), then Phase 2.
+
 ---
 
 ## 29. Current Repository State
@@ -744,3 +779,8 @@ identification (§24), then Phase 2.
   compose watch` hot reload, health-gated startup ordering, the prod Compose overlay, and the Husky
   → toolbox → lint-staged/commitlint hook chain were all exercised live, and two real bugs surfaced
   only by doing so (see Entry 2) — both fixed before this entry.
+- **All six Dockerfiles pass hadolint** (Entry 3, DD-017): verified locally via `docker run --rm -i
+  hadolint/hadolint < <file>` for `apps/dashboard`, `services/{edge,api,copilot,ml}`, and
+  `docker/tools.Dockerfile` — zero output on all six. The first CI run's `dockerfile-lint` matrix job
+  had failed on `services/edge/Dockerfile` (DL3008); a fresh CI run has not yet been observed to
+  confirm the full matrix goes green (see Entry 3 Remaining work).
