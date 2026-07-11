@@ -6,3 +6,9 @@ allowBuilds:
   # resolver) both need their native postinstall build steps to function.
   esbuild: true
   unrs-resolver: true
+overrides:
+  # vitest 3.2.7's own vite-node/@vitest/mocker sub-dependencies resolve an
+  # older vite (5.4.21) independently of the workspace's direct vite
+  # dependency; force everything onto the patched line (GHSA-fx2h-pf6j-xcff,
+  # fixed in 6.4.3) so `pnpm audit` doesn't flag the transitive copy.
+  vite: "^6.4.3"
