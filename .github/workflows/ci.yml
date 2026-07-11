@@ -148,6 +148,17 @@ jobs:
         with:
           version: "0.5.9"
       - name: pip-audit (per service)
+        env:
+          # pip-audit builds a throwaway venv via `EnvBuilder(with_pip=True)`
+          # without `symlinks=True`, so it *copies* the interpreter instead of
+          # symlinking it. uv's managed standalone CPython relies on a
+          # $ORIGIN-relative RPATH to find its own libpython*.so, which breaks
+          # once copied elsewhere (silent exit 127, no output — the error is
+          # merged into `_call_new_python`'s captured output, which the
+          # unhandled CalledProcessError never prints). The system Python on
+          # the runner doesn't have this relocatable-build layout, so force
+          # uv to use it here instead of downloading/managing its own.
+          UV_PYTHON_PREFERENCE: only-system
         run: |
           for d in services/*/; do
             echo "::group::pip-audit $d"
