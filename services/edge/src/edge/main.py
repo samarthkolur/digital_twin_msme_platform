@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from paho.mqtt.enums import CallbackAPIVersion
 
 from edge.providers import SensorProvider, get_provider
-from edge.storage import RawReadingStore
+from edge.storage import RawReadingStore, StateStore
 
 logger = logging.getLogger("edge")
 
@@ -20,7 +20,8 @@ SENSOR_PROVIDER = os.environ.get("SENSOR_PROVIDER", "simulated")
 ASSET_ID = os.environ.get("ASSET_ID", "motor_01")
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
-MQTT_TOPIC = f"digital-cousin/{ASSET_ID}/raw"
+RAW_MQTT_TOPIC = f"digital-cousin/{ASSET_ID}/raw"
+STATE_MQTT_TOPIC = f"digital-cousin/{ASSET_ID}/state"
 DATABASE_PATH = os.environ.get("DATABASE_PATH", ":memory:")
 PUBLISH_INTERVAL_SECONDS = float(os.environ.get("PUBLISH_INTERVAL_SECONDS", "5"))
 
@@ -30,10 +31,12 @@ _provider: SensorProvider | None = None
 async def read_and_publish_once(
     provider: SensorProvider,
     client: mqtt.Client,
-    store: RawReadingStore,
+    raw_store: RawReadingStore,
+    state_store: StateStore,
 ) -> None:
-    """Reads the active sensor provider once, logs the raw reading to SQLite,
-    and publishes it to MQTT for intra-device consumers.
+    """Reads the active sensor provider once, logs it to SQLite (both the
+    Phase 2 raw log and the Phase 3 state history), and publishes it to MQTT
+    for intra-device consumers.
 
     A transient read failure (real hardware I/O is flaky) is logged and
     swallowed rather than propagated, so the caller's loop keeps running.
@@ -44,36 +47,42 @@ async def read_and_publish_once(
         logger.exception("sensor read failed, skipping this cycle")
         return
 
-    store.insert(ASSET_ID, sample.vibration_rms_g, sample.temperature_c)
+    raw_store.insert(ASSET_ID, sample.vibration.rms_g, sample.temperature_c)
     client.publish(
-        MQTT_TOPIC,
+        RAW_MQTT_TOPIC,
         json.dumps(
             {
                 "asset_id": ASSET_ID,
                 "ts": datetime.now(UTC).isoformat(),
-                "vibration_rms_g": sample.vibration_rms_g,
+                "vibration_rms_g": sample.vibration.rms_g,
                 "temperature_c": sample.temperature_c,
             }
         ),
     )
 
+    state_store.insert(ASSET_ID, sample)
+    state = state_store.latest(ASSET_ID)
+    client.publish(STATE_MQTT_TOPIC, json.dumps(state))
+
 
 async def publish_loop(
     provider: SensorProvider,
     client: mqtt.Client,
-    store: RawReadingStore,
+    raw_store: RawReadingStore,
+    state_store: StateStore,
 ) -> None:
     """Calls `read_and_publish_once` on a fixed interval, forever."""
     while True:
         await asyncio.sleep(PUBLISH_INTERVAL_SECONDS)
-        await read_and_publish_once(provider, client, store)
+        await read_and_publish_once(provider, client, raw_store, state_store)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global _provider
     _provider = get_provider(SENSOR_PROVIDER)
-    store = RawReadingStore(DATABASE_PATH)
+    raw_store = RawReadingStore(DATABASE_PATH)
+    state_store = StateStore(DATABASE_PATH)
 
     client = mqtt.Client(CallbackAPIVersion.VERSION2)
     # connect_async + loop_start defer/retry the connection in the background
@@ -82,7 +91,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client.connect_async(MQTT_HOST, MQTT_PORT)
     client.loop_start()
 
-    publish_task = asyncio.create_task(publish_loop(_provider, client, store))
+    publish_task = asyncio.create_task(publish_loop(_provider, client, raw_store, state_store))
 
     logger.info("edge service started with provider=%s", SENSOR_PROVIDER)
     try:
@@ -93,7 +102,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await publish_task
         client.loop_stop()
         client.disconnect()
-        store.close()
+        raw_store.close()
+        state_store.close()
         _provider.close()
         _provider = None
 

@@ -89,7 +89,10 @@ def test_read_computes_ac_coupled_rms_and_temperature(
 
     # mean magnitude = (0.9984 + 1.0374) / 2 = 1.0179; each sample deviates
     # from it by exactly +-0.0195 g, so RMS of the AC-coupled signal is 0.0195.
-    assert sample.vibration_rms_g == pytest.approx(0.0195, abs=1e-4)
+    # (Feature-math correctness itself is covered by test_features.py; this
+    # test only confirms `read()` wires the burst into that computation.)
+    assert sample.vibration.rms_g == pytest.approx(0.0195, abs=1e-4)
+    assert sample.vibration.sampling_hz == 800
     assert sample.temperature_c == 42.5
 
 

@@ -73,6 +73,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      ASSET_ID: ${ASSET_ID:-motor_01}
       DATABASE_PATH: /data/digital_cousin.sqlite3
     volumes:
       - sqlite-data:/data
