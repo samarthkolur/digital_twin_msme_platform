@@ -859,6 +859,37 @@ file if its rationale ever needs more than the one-line table entry).
 **Recommended next task:** Push/re-run CI to confirm the full pipeline is green (unchanged from
 Entry 4), then hardware procurement and pilot machine identification (§24), then Phase 2.
 
+### Entry 6 — Phase 1, M1–M2 (logical project time: 2026-07-11, same day)
+
+**Task completed:** Investigated and fixed the failing `Dependency audit` GitHub Actions job
+(`run_id=29141265728`, `job_id=86514811281`). Pulled the job logs and confirmed `pnpm audit` was
+already clean; the failure occurred only in the Python audit stage when `pip-audit` attempted to
+create a temporary virtual environment and failed inside `ensurepip` (non-zero exit `127`).
+
+**Files created:** none.
+
+**Files modified:** `.github/workflows/ci.yml` (dependency-audit step now exports requirements with
+`--no-emit-project` and runs `uvx pip-audit --no-deps -r /tmp/reqs.txt` for each service).
+
+**Files deleted/moved:** none.
+
+**Reason for change:** `uv export --format requirements-txt` can include `-e .` (the local project),
+which is not a published package artifact and causes `pip-audit` install/hash validation paths to
+fail in CI. Exporting with `--no-emit-project` removes that local editable line, and `--no-deps`
+keeps `pip-audit` from performing unnecessary dependency resolution/virtualenv bootstrap against an
+already fully resolved lockfile export.
+
+**Architectural decisions:** none new; aligns with DD-015's dependency-auditing approach while
+making the CI invocation deterministic on hosted runners.
+
+**Remaining work:** Re-run CI to confirm the `Dependency audit` job is green end-to-end on GitHub
+Actions.
+
+**Known issues:** None newly introduced.
+
+**Recommended next task:** Re-run the `CI` workflow and verify all required checks pass, then
+continue with §24 Pending Tasks.
+
 ---
 
 ## 29. Current Repository State
@@ -888,6 +919,10 @@ Entry 4), then hardware procurement and pilot machine identification (§24), the
 - **Dashboard on `vite@6.4.3`/`vitest@3.2.7`** (Entry 4, DD-018), with a `pnpm-workspace.yaml`
   `overrides.vite` pin so vitest's internal `vite-node`/`@vitest/mocker` can't drag in the older,
   vulnerable `vite@5.4.21` transitively — `pnpm audit --audit-level=high` clean as of this entry.
+- **Dependency-audit CI Python path hardened** (Entry 6): each service now exports requirements with
+  `uv export --no-emit-project`, and `pip-audit` runs with `--no-deps` against that lock-resolved
+  list, avoiding the runner-specific `ensurepip` virtualenv bootstrap failure seen in run
+  `29141265728` / job `86514811281` and avoiding local editable-package hash/install failures.
 - **`container-scan` (Trivy) CI job ref fixed** (Entry 4, DD-019): `aquasecurity/trivy-action` now
   pinned to the real tag `v0.29.0` (was missing the `v` prefix, so the job failed before Trivy ever
   ran); not yet re-confirmed on a fresh CI run (see Entry 4 Remaining work).
