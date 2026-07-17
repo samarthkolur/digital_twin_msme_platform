@@ -5,7 +5,7 @@ description = "Digital Cousin edge service: sensor acquisition, feature extracti
 requires-python = ">=3.11,<3.12"
 dependencies = [
   "fastapi>=0.115",
-  "uvicorn[standard]>=0.32",
+  "uvicorn[standard]>=0.51.0",
   "pydantic>=2.9",
   "paho-mqtt>=2.1",
 ]
