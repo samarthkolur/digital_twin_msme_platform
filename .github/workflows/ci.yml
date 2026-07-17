@@ -42,7 +42,7 @@ jobs:
         service: [edge, api, copilot, ml]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.5.9"
       - run: uv python install 3.11
@@ -144,7 +144,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level=high
-      - uses: astral-sh/setup-uv@v4
+      - uses: astral-sh/setup-uv@v7
         with:
           version: "0.5.9"
       - name: pip-audit (per service)
