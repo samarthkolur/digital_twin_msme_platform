@@ -16,7 +16,7 @@ dependencies = [
 # optional so CI/dev-container installs stay fast. The API-fallback path
 # (httpx, above) works without this extra.
 local-llm = [
-  "llama-cpp-python>=0.3.2",
+  "llama-cpp-python>=0.3.34",
 ]
 
 [dependency-groups]
