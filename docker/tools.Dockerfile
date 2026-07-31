@@ -1,7 +1,7 @@
 # Toolbox image: the single environment for local quality gates (lint, format,
 # typecheck, test, git hooks) and for CI. Host machines only need Docker —
 # no Node, pnpm, Python, ruff or mypy installation is required to contribute.
-FROM node:22-slim
+FROM node:25-slim
 
 # hadolint ignore=DL3008
 RUN apt-get update \
