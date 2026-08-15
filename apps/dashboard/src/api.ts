@@ -41,3 +41,25 @@ export async function fetchCurrentState(): Promise<DigitalTwinState> {
 
   return (await response.json()) as DigitalTwinState;
 }
+
+// api's Query(default=100, ge=1, le=1000) — see services/api/src/api/main.py.
+const MAX_HISTORY_LIMIT = 1000;
+
+/**
+ * Fetches up to `limit` most-recent state objects (api returns most-recent-first).
+ * A 404 (no data recorded yet) is treated the same as an empty history rather
+ * than an error — the dashboard's trend charts render an empty state either way.
+ */
+export async function fetchStateHistory(limit: number): Promise<DigitalTwinState[]> {
+  const cappedLimit = Math.min(limit, MAX_HISTORY_LIMIT);
+  const response = await fetch(`${API_URL}/state/history?limit=${String(cappedLimit)}`);
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(`Failed to fetch state history: HTTP ${String(response.status)}`);
+  }
+
+  return (await response.json()) as DigitalTwinState[];
+}
