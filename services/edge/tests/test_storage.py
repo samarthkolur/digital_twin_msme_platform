@@ -39,6 +39,7 @@ def _sample() -> SensorSample:
             sampling_hz=3200,
         ),
         temperature_c=54.3,
+        raw_vibration_window_g=[1.0, 1.1, 0.9, 1.05],
     )
 
 
@@ -87,6 +88,7 @@ def test_state_store_history_returns_most_recent_first() -> None:
                     rms_g=0.99, kurtosis=3.0, crest_factor=4.0, peak_to_peak_g=2.0, sampling_hz=3200
                 ),
                 temperature_c=60.0,
+                raw_vibration_window_g=[1.0, 1.1, 0.9, 1.05],
             ),
         )
 

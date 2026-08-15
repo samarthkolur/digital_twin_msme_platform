@@ -2,6 +2,7 @@ import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
+from edge.ml_inference import MLInferenceResult
 from edge.providers.base import SensorSample
 
 _RAW_READINGS_SCHEMA = """
@@ -104,13 +105,21 @@ class StateStore:
         self._conn.execute(STATE_HISTORY_SCHEMA)
         self._conn.commit()
 
-    def insert(self, asset_id: str, sample: SensorSample) -> None:
+    def insert(
+        self, asset_id: str, sample: SensorSample, ml_result: MLInferenceResult | None = None
+    ) -> None:
+        """`ml_result` is `None` whenever no ML artifacts have been trained
+        yet (design.md §24) — anomaly_score/health_index/model_confidence/
+        alert_level are left NULL in that case, exactly as before
+        `edge.ml_inference` existed (DD-023).
+        """
         self._conn.execute(
             "INSERT INTO state_history ("
             "  asset_id, ts, vibration_rms_g, vibration_kurtosis,"
             "  vibration_crest_factor, vibration_peak_to_peak_g,"
-            "  vibration_sampling_hz, temperature_c"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "  vibration_sampling_hz, temperature_c,"
+            "  anomaly_score, health_index, model_confidence, alert_level"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 asset_id,
                 datetime.now(UTC).isoformat(),
@@ -120,6 +129,10 @@ class StateStore:
                 sample.vibration.peak_to_peak_g,
                 sample.vibration.sampling_hz,
                 sample.temperature_c,
+                ml_result.anomaly_score if ml_result is not None else None,
+                ml_result.health_index if ml_result is not None else None,
+                ml_result.model_confidence if ml_result is not None else None,
+                ml_result.alert_level if ml_result is not None else None,
             ),
         )
         self._conn.commit()
