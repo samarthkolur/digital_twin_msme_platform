@@ -7,7 +7,7 @@ dependencies = [
   "scikit-learn>=1.5",
   "torch>=2.5",
   "numpy>=2.0",
-  "pandas>=2.2",
+  "pandas>=3.0.5",
   # ONNX export (design.md DD-031, supersedes the originally documented
   # TFLite target): torch.onnx.export is built into torch already; skl2onnx
   # converts the Isolation Forest so both models share one runtime
