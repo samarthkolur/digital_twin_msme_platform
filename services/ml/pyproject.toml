@@ -8,6 +8,15 @@ dependencies = [
   "torch>=2.5",
   "numpy>=2.0",
   "pandas>=2.2",
+  # ONNX export (design.md DD-031, supersedes the originally documented
+  # TFLite target): torch.onnx.export is built into torch already; skl2onnx
+  # converts the Isolation Forest so both models share one runtime
+  # (onnxruntime) at inference time in services/edge.
+  "onnx>=1.17",
+  "skl2onnx>=1.17",
+  # torch>=2.9's default ONNX exporter is dynamo-based and requires this;
+  # without it torch.onnx.export raises ModuleNotFoundError at call time.
+  "onnxscript>=0.2",
 ]
 
 [dependency-groups]
@@ -29,7 +38,7 @@ strict = true
 files = "src"
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "torch.*", "pandas.*"]
+module = ["sklearn.*", "torch.*", "pandas.*", "skl2onnx.*", "onnx.*", "onnxscript.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

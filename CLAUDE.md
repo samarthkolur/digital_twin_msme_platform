@@ -12,6 +12,8 @@ The primary source of truth for the project is:
 
 When information already exists in `design.md`, treat it as the canonical source rather than rediscovering it by inspecting the repository.
 
+`to_do.md`, when present, is a chronological action-item checklist derived from `design.md`'s Pending Tasks (§24) and Development Log (§28). It is a companion index, not a second source of truth: every item in it must be traceable to a `design.md` section, and it should be regenerated/updated alongside `design.md` rather than diverging from it.
+
 ---
 
 # Primary Rules

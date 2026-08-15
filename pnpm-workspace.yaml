@@ -12,3 +12,25 @@ overrides:
   # dependency; force everything onto the patched line (GHSA-fx2h-pf6j-xcff,
   # fixed in 6.4.3) so `pnpm audit` doesn't flag the transitive copy.
   vite: "^6.4.3"
+  # Newly-disclosed advisories (as of this override, none tied to any code
+  # change here) in deep transitive deps of dev-only tooling — commitlint's
+  # ajv->fast-uri, eslint's own js-yaml/minimatch->brace-expansion chain, and
+  # vitest coverage's glob->minimatch->brace-expansion chain. Same pattern as
+  # the vite override above: force every transitive copy onto the patched
+  # line so `pnpm audit --audit-level=high` stays clean.
+  fast-uri: ">=3.1.5"
+  js-yaml: ">=4.3.1"
+  postcss: ">=8.5.18"
+  nanoid: ">=3.3.18"
+  # brace-expansion needs per-major-line targeting (not a single blanket
+  # override like the others above): minimatch@3.x's own code calls an API
+  # (`.braceExpand`) that only the 1.x line of brace-expansion has, so
+  # forcing every consumer to one version broke ESLint outright (`TypeError:
+  # expand is not a function`) — confirmed by testing `make lint`, not
+  # assumed. An open-ended `>=1.1.18` range doesn't stay within the 1.x
+  # line either (pnpm resolves it to the newest version satisfying that
+  # inequality, i.e. the same 5.x it was supposed to avoid) — `^1.1.18`
+  # caret-range pins it to patched 1.x only, confirmed via `pnpm why
+  # brace-expansion` after each attempt.
+  minimatch@3>brace-expansion: "^1.1.18"
+  minimatch@9>brace-expansion: "^2.1.4"

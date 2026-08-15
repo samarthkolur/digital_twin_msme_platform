@@ -20,6 +20,11 @@ class VibrationFeatures:
 class SensorSample:
     vibration: VibrationFeatures
     temperature_c: float
+    # The raw AC-coupled magnitude window `vibration` was computed from
+    # (design.md §6.3 DD-031) — kept alongside the derived features so
+    # `edge.ml_inference` can feed the autoencoder, which operates on the raw
+    # window rather than the four statistical features.
+    raw_vibration_window_g: list[float]
 
 
 class SensorProvider(ABC):

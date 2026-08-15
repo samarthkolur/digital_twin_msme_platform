@@ -71,6 +71,7 @@ class HardwareSensorProvider(SensorProvider):
         return SensorSample(
             vibration=vibration,
             temperature_c=round(self._temp_sensor.get_temperature(), 2),
+            raw_vibration_window_g=magnitudes_g,
         )
 
     def close(self) -> None:

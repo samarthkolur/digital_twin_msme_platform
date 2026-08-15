@@ -8,6 +8,11 @@ dependencies = [
   "uvicorn[standard]>=0.32",
   "pydantic>=2.9",
   "paho-mqtt>=2.1",
+  # ONNX inference (design.md DD-031) for services/ml's exported Isolation
+  # Forest + autoencoder models. Ships prebuilt wheels (no native compiler
+  # needed at install time, unlike the optional `hardware`/`local-llm`
+  # extras elsewhere in this repo), so it's a plain dependency, not extra.
+  "onnxruntime>=1.20",
 ]
 
 [project.optional-dependencies]
@@ -26,6 +31,10 @@ dev = [
   "pytest-cov>=6.0",
   "mypy>=1.13",
   "httpx>=0.27",
+  # Test-only: hand-builds tiny stub ONNX graphs to exercise edge.ml_inference
+  # without depending on services/ml's actual training stack (sklearn/torch)
+  # — edge and ml stay independent services per DD-002.
+  "onnx>=1.17",
 ]
 
 [build-system]
@@ -42,6 +51,10 @@ files = "src"
 [[tool.mypy.overrides]]
 # Hardware-only deps (Raspberry Pi target); not installed outside the `hardware` extra.
 module = ["spidev.*", "w1thermsensor.*", "RPi.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["onnxruntime.*", "onnx.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

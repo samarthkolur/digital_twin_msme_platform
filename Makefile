@@ -3,7 +3,7 @@ COMPOSE := docker compose
 
 .PHONY: bootstrap up watch down build logs ps clean \
 	lint lint-fix format format-check typecheck test knip \
-	train shell-tools
+	train train-synthetic shell-tools
 
 ## Onboarding ---------------------------------------------------------------
 
@@ -62,8 +62,11 @@ test: ## Run all test suites with coverage
 knip: ## Detect unused deps/exports/dead files in the TS workspace
 	$(TOOLBOX) pnpm run knip
 
-train: ## Run the ML training pipeline (Isolation Forest + autoencoder)
+train: ## Run the ML training pipeline against the real CWRU dataset (fails until it's downloaded, design.md §24)
 	$(COMPOSE) --profile training run --rm ml-trainer
+
+train-synthetic: ## Run the ML training pipeline against synthetic placeholder data (design.md DD-031) — for pipeline dev/demo only, not a calibrated detector
+	$(COMPOSE) --profile training run --rm ml-trainer uv run python -m ml.pipeline --allow-synthetic
 
 shell-tools: ## Drop into the toolbox container
 	$(COMPOSE) run --rm --no-deps toolbox bash

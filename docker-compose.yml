@@ -51,8 +51,15 @@ services:
       MQTT_PORT: "1883"
       DATABASE_PATH: /data/digital_cousin.sqlite3
       PUBLISH_INTERVAL_SECONDS: "5"
+      ML_ARTIFACTS_DIR: /app/ml-artifacts
     volumes:
       - sqlite-data:/data
+      # Same host path the ml-trainer profile writes into (below) — read-only
+      # here since edge only consumes trained models, never produces them.
+      # Absent until `make train` has run at least once (design.md §24);
+      # MLInferenceEngine.load() handles that by disabling inference, not
+      # failing startup.
+      - ./services/ml/artifacts:/app/ml-artifacts:ro
     develop:
       watch:
         - path: ./services/edge/src
@@ -97,7 +104,12 @@ services:
     ports:
       - "8001:8001"
     env_file:
-      - path: ${SECRETS_FILE:-./deploy/secrets.env.local}
+      # SECRETS_FILE is always set once .env exists (bootstrap.sh copies it from
+      # .env.example, whose default is $HOME/.config/digital-cousin/secrets.env,
+      # DD-010) — the fallback below only matters if compose runs with no .env
+      # at all, so it deliberately points at a real, if empty, gitignored path
+      # rather than a nonexistent directory.
+      - path: ${SECRETS_FILE:-./.secrets.env.local}
         required: false
     environment:
       COPILOT_LLM_MODE: ${COPILOT_LLM_MODE:-local}
