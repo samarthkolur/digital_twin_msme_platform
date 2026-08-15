@@ -15,8 +15,10 @@ all of it end-to-end in a working Ubuntu Docker environment — `make lint`/`typ
 dashboard click-through, and a live copilot `POST /query`. Six real bugs were found (only visible by
 actually running the code) and fixed: 2 ESLint errors, 7 mypy findings, 1 flaky test assertion, 1
 circular import, and 2 ONNX toolchain version-skew issues (DD-034, DD-035). Section 0 below is now
-closed out; committed as five commits on `feature/dashboard-live-state` (not yet pushed/opened as a
-PR — see §1).
+closed out; committed as five commits on `feature/dashboard-live-state` and pushed. **Entry 15**
+(same day) then opened the PR and fixed what only surfaced on GitHub Actions, not locally: a
+`prettier --check` failure on `to_do.md` and a live `pnpm audit --audit-level=high` failure (6
+newly-disclosed CVEs in transitive dev-tooling deps, unrelated to any code in this branch — DD-037).
 
 ---
 
@@ -30,7 +32,7 @@ PR — see §1).
 - [x] `docker compose build` — all six images (`dashboard`, `api`, `copilot`, `edge`, `mosquitto`,
       `ml-trainer`) build clean.
 - [x] `make train-synthetic` — produced real `services/ml/artifacts/{isolation_forest.onnx,
-    autoencoder.onnx(+.onnx.data), health_index_calibration.json, manifest.json}`. Needed two
+autoencoder.onnx(+.onnx.data), health_index_calibration.json, manifest.json}`. Needed two
       fixes first (design.md DD-034): skl2onnx's `target_opset` pinned explicitly (its own default
       emitted an opset it also claims not to support), and `onnxscript` added as a dependency
       (torch's now-default dynamo ONNX exporter requires it).
@@ -45,7 +47,7 @@ PR — see §1).
       (`["label", "scores"]`); the `"score"` substring hint correctly matches `"scores"`. Confirmed
       correct, not just plausible.
 - [x] `POST /query` on the copilot — live call returned `{"used_fallback": true, "context_size":
-    10}`: retrieval correctly pulled 10 recent state objects from `api`, and fallback correctly
+10}`: retrieval correctly pulled 10 recent state objects from `api`, and fallback correctly
       triggered since no LLM weights/API key are configured yet (§4 below covers that).
 - [x] Committed (Conventional Commits, no Claude co-author, matching `git log` style) as
       `feat(ml)`, `fix(ml)` (file-permission cleanup), `feat(edge)`, `feat(copilot)`,
@@ -53,9 +55,12 @@ PR — see §1).
 
 ## 1. Housekeeping
 
-- [ ] **Push `feature/dashboard-live-state` and open its PR** (or merge it) so CI actually runs
-      against it — per design.md §29, this branch (including Entry 13/14's new commits) has only
-      ever been validated locally, never on GitHub Actions.
+- [x] **Push `feature/dashboard-live-state` and open its PR** — done, Entry 14/15. First CI run
+      (PR #61) failed on two checks neither local `make lint`/`make test` covers: `prettier --check`
+      on `to_do.md` (fixed — a stray 2-space continuation-line indent) and `pnpm audit
+    --audit-level=high` (6 newly-disclosed CVEs in transitive dev-tooling deps — `fast-uri`,
+      `js-yaml`, `postcss`, `nanoid`, `brace-expansion`, unrelated to any code in this branch; fixed
+      via `pnpm-workspace.yaml` overrides, DD-037). Re-push and confirm CI green is still pending.
 - [ ] **Resolve the untracked `digital_twin_msme_platform.git/` directory** at the project root. It's
       a bare git repo (`HEAD`/`objects`/`refs`/`packed-refs`), untracked, purpose unclear — looks like
       a stray clone or backup. Still not touched, pending user confirmation. (design.md §24, §25)

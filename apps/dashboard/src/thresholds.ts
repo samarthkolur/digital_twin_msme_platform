@@ -12,7 +12,7 @@ export interface AlertThresholds {
   temperatureC: number;
 }
 
-export interface DashboardAlert {
+interface DashboardAlert {
   level: "warning" | "critical";
   message: string;
 }

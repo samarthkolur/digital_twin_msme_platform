@@ -532,6 +532,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-034 | `services/ml/src/ml/isolation_forest.py`'s `export_isolation_forest_to_onnx` pins `target_opset={"ai.onnx.ml": 3, "": 18}` explicitly; `services/ml/pyproject.toml` adds `onnxscript>=0.2` as a plain dependency | Verifying Entry 13 for real (this entry) surfaced two toolchain version-skew bugs neither DD-031 nor Entry 13 could have caught without executing the pipeline: (1) `skl2onnx==1.20.0`'s `IsolationForest` converter emits `ai.onnx.ml` ops tagged opset 4, but the same library's own opset-support table caps `ai.onnx.ml` at 3 — an internal skl2onnx inconsistency, not a real modeling issue; pinning `target_opset` explicitly (verified working against `onnx==1.22.0`/`skl2onnx==1.20.0`) sidesteps it. (2) `torch==2.13`'s `torch.onnx.export` now defaults to the dynamo-based exporter (the legacy TorchScript exporter emits a `DeprecationWarning` and is being phased out per PyTorch's own 2.9 release notes), which requires `onnxscript` as a runtime dependency — without it `export_autoencoder_to_onnx` raised `ModuleNotFoundError` on first real invocation |
 | DD-035 | `services/edge/src/edge/providers/__init__.py`'s `get_provider("simulated")` branch lazily imports `SimulatedSensorProvider` inside the function body, matching the existing lazy-import pattern already used for `"hardware"` | Entry 13 added `edge.providers.simulated`'s import of `edge.features.compute_vibration_features` (so the simulated provider derives its four statistical features from a real raw window via the same function `hardware.py` uses, DD-031's window-shape consistency goal) — but `edge.features` itself imports `edge.providers.base.VibrationFeatures`, and Python always runs a package's `__init__.py` before any of its submodules. The result was a real circular import (`edge.features` → `edge.providers` package init → `edge.providers.simulated` → `edge.features`, still mid-initialization) that broke on any entry point importing `edge.features` first (e.g. `tests/test_features.py`) — never previously exercised because nothing imported `edge.features` directly before this session's `make test` run. Lazy import breaks the cycle without restructuring the module layout |
 | DD-036 | This session's Docker-based verification (`make lint`/`typecheck`/`test`, `docker compose build`, `make train-synthetic`, `docker compose up`) ran on a fresh Ubuntu Docker install where `docker compose run`'s default user is root inside every container, including the `toolbox` container Husky's pre-commit hook shells into (§7.6) — every hook-triggered `git` operation (`lint-staged`'s internal `git stash`) and every bind-mounted write (`services/ml/artifacts/`, `.venv/`, coverage output) left files/`.git` internals root-owned on the host, which then blocked the *next* host-side `git commit` with "insufficient permission for adding an object to repository database." Fixed per-occurrence with a throwaway `docker run --rm -v "$(pwd):/repo" alpine chown -R "$(id -u)":"$(id -g)" /repo` rather than any project-file or git-config change | This is a distinct root cause from the DD-030/Entry-12 Windows/NTFS executable-bit issue (§25) — confirmed in this entry: `.husky/commit-msg`/`.husky/pre-commit`/`scripts/bootstrap.sh` show **zero** mode diff on this Ubuntu checkout (`git diff --summary` clean), so that specific historical concern does not reproduce here and needs no `core.filemode` change. The *new* finding is that Husky's own hook invocation (not the checkout) intermittently reintroduces spurious `+x` bits and root ownership on newly-created tracked files via the same toolbox-container mechanism — worth a future look at running the toolbox container with `--user "$(id -u):$(id -g)"` (tracked as Technical Debt, §26) so host-side git operations never need a manual chown afterward |
+| DD-037 | `pnpm-workspace.yaml`'s `overrides` gained six entries (`fast-uri`, `js-yaml`, `postcss`, `nanoid`, and two parent-scoped `brace-expansion` entries) after PR #61's first CI run failed `pnpm audit --audit-level=high` with newly-disclosed advisories in transitive dev-tooling deps (commitlint→ajv→fast-uri; eslint's own js-yaml/minimatch→brace-expansion chain; vitest coverage's glob→minimatch→brace-expansion chain) — none tied to any code change in this branch, same category as DD-018's pre-existing `vite` override. `brace-expansion` specifically needed **parent-scoped** overrides (`minimatch@3>brace-expansion: "^1.1.18"`, `minimatch@9>brace-expansion: "^2.1.4"`, pnpm's documented `parent@range>child` syntax) rather than a single blanket one | Two real mistakes made and corrected while fixing this, both confirmed by actually re-running `make lint`/`pnpm audit` after each attempt rather than assumed: (1) a blanket `brace-expansion: ">=5.0.9"` override collapsed *every* consumer (including `minimatch@3.1.5`, which calls a `.braceExpand` API only `brace-expansion`'s 1.x line has) onto the newest line, breaking ESLint outright (`TypeError: expand is not a function`) — parent-scoping by consumer, not just the target package, was required. (2) the parent-scoped override still didn't stick until the *target* range was changed from open-ended `>=1.1.18` to caret `^1.1.18` — pnpm resolves an open-ended `>=` range to the newest version satisfying that inequality (5.0.9 numerically satisfies `>=1.1.18`), not "newest within that major line," so it silently reproduced mistake (1) even though the parent scope was correct. `pnpm why brace-expansion` after each attempt is what surfaced both mistakes concretely rather than trusting the override syntax alone |
 
 ---
 
@@ -838,6 +839,11 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
 
 ## 26. Technical Debt
 
+- The Makefile's `lint` target doesn't run `format:check` or `knip`, both of which are required
+  gates in the same CI job (`.github/workflows/ci.yml`'s TypeScript job runs format:check → lint →
+  typecheck → test → knip in sequence) — found in Entry 15 when PR #61's first CI run failed on
+  `format:check` despite a clean local `make lint`. Add both to a combined local target so this
+  local/CI gap doesn't recur.
 - Mosquitto authentication/TLS deferred until the broker is ever exposed beyond localhost/LAN.
 - `api`'s CORS policy allows all origins (DD-027) — same localhost/LAN-only reasoning as the
   Mosquitto item above; revisit together if this API is ever exposed beyond localhost/LAN.
@@ -1827,6 +1833,49 @@ in this environment now has been.
 **Recommended next task:** Open the PR for `feature/dashboard-live-state` (§24) so this entry's
 commits actually run through GitHub Actions CI, not just local verification — that's the one
 verification layer this entry couldn't reach from a local Docker environment.
+
+---
+
+### Entry 15 — CI verification (logical project time: 2026-08-15, same day)
+
+**Task completed:** Opened PR #61 for `feature/dashboard-live-state` (per Entry 14's recommended
+next task) and fixed everything its first CI run caught that local verification hadn't: a
+`prettier --check` failure on `to_do.md` and a `pnpm audit --audit-level=high` failure (DD-037).
+
+**Files modified:**
+- `to_do.md` — a stray 2-space continuation-line indent (inconsistent with the file's own 6-space
+  convention elsewhere) that `prettier --write` needed two passes to fully normalize.
+- `pnpm-workspace.yaml`, `pnpm-lock.yaml` — six new `overrides` entries (DD-037) for CVEs disclosed
+  in transitive dev-tooling dependencies since this branch's `pnpm-lock.yaml` was last regenerated
+  (2026-07-11) — unrelated to any code in this branch, same category as DD-018's existing `vite`
+  override.
+- `apps/dashboard/src/thresholds.ts` — dropped `export` from `DashboardAlert` (knip: unused outside
+  its own module — `AlertsPanel.tsx` consumes `evaluateAlerts`'s return type by inference, never
+  imports the type by name). Genuinely dead surface area, not a false positive.
+
+**Files created/deleted:** None.
+
+**Reason for change:** CI is a real verification layer local Docker execution can't fully replicate
+— specifically, `pnpm audit` queries a live advisory database, so a lockfile that was clean when
+last regenerated can start failing the same check weeks later with zero code change, and CI runs
+`knip`/`format:check` in the same job as lint/typecheck/test where this session's local `make lint`
+target does not (§7.6's Makefile only wires up `lint`, not `format-check`/`knip`, into the primary
+gate command run in Entry 14 — a gap worth closing, see §26).
+
+**Architectural decisions:** DD-037 (pnpm audit override fixes, including two real mistakes made and
+corrected in the process — see the DD itself for the exact failure modes and how each was confirmed).
+
+**Remaining work:** Confirm PR #61's CI run is fully green after this entry's push (not yet
+confirmed as of writing — this entry fixed the two known failures locally but hasn't re-run them
+through GitHub Actions yet). See §24.
+
+**Known issues:** Local `make lint`/`make test` do not run `format:check` or `knip`, both of which
+are required CI gates in the same `ci.yml` job — worth adding both to the Makefile's `lint` target
+(or a new combined target) so this gap doesn't recur. Tracked as Technical Debt (§26).
+
+**Recommended next task:** Verify PR #61 is green on GitHub Actions; if so, merge or continue
+iterating per §24's remaining priorities (CWRU/IMS datasets, TinyLlama weights, hardware
+procurement).
 
 ---
 
