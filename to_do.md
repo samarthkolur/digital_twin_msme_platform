@@ -58,9 +58,10 @@ autoencoder.onnx(+.onnx.data), health_index_calibration.json, manifest.json}`. N
 - [x] **Push `feature/dashboard-live-state` and open its PR** — done, Entry 14/15. First CI run
       (PR #61) failed on two checks neither local `make lint`/`make test` covers: `prettier --check`
       on `to_do.md` (fixed — a stray 2-space continuation-line indent) and `pnpm audit
---audit-level=high` (6 newly-disclosed CVEs in transitive dev-tooling deps — `fast-uri`,
+    --audit-level=high` (6 newly-disclosed CVEs in transitive dev-tooling deps — `fast-uri`,
       `js-yaml`, `postcss`, `nanoid`, `brace-expansion`, unrelated to any code in this branch; fixed
-      via `pnpm-workspace.yaml` overrides, DD-037). Re-push and confirm CI green is still pending.
+      via `pnpm-workspace.yaml` overrides, DD-037). Re-pushed and **confirmed fully green**: all 22
+      `ci.yml` jobs + CodeQL passing on PR #61.
 - [ ] **Resolve the untracked `digital_twin_msme_platform.git/` directory** at the project root. It's
       a bare git repo (`HEAD`/`objects`/`refs`/`packed-refs`), untracked, purpose unclear — looks like
       a stray clone or backup. Still not touched, pending user confirmation. (design.md §24, §25)

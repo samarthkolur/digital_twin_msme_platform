@@ -1865,9 +1865,13 @@ gate command run in Entry 14 — a gap worth closing, see §26).
 **Architectural decisions:** DD-037 (pnpm audit override fixes, including two real mistakes made and
 corrected in the process — see the DD itself for the exact failure modes and how each was confirmed).
 
-**Remaining work:** Confirm PR #61's CI run is fully green after this entry's push (not yet
-confirmed as of writing — this entry fixed the two known failures locally but hasn't re-run them
-through GitHub Actions yet). See §24.
+**Remaining work:** None for this specific verification pass — confirmed. After pushing the fixes
+(one follow-up commit was needed: prettier's markdown formatter took two more `--write` passes to
+fully converge on `to_do.md`, confirmed via a third `--check` pass), PR #61's CI run went fully
+green: all 22 jobs in `ci.yml` (TypeScript/Python quality gates × 4 services, 6 Docker builds, 5
+hadolint runs, Trivy, gitleaks, dependency audit, compose-config validation) plus CodeQL. See §24 for
+what's still genuinely outstanding (real hardware/datasets/LLM weights) — nothing left blocking on
+the software-verification side.
 
 **Known issues:** Local `make lint`/`make test` do not run `format:check` or `knip`, both of which
 are required CI gates in the same `ci.yml` job — worth adding both to the Makefile's `lint` target
