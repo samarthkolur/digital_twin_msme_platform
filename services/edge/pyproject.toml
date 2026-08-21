@@ -29,7 +29,7 @@ hardware = [
 dev = [
   "pytest>=8.3",
   "pytest-cov>=6.0",
-  "mypy>=1.13",
+  "mypy>=2.3.1",
   "httpx>=0.27",
   # Test-only: hand-builds tiny stub ONNX graphs to exercise edge.ml_inference
   # without depending on services/ml's actual training stack (sklearn/torch)
