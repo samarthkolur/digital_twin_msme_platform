@@ -16,7 +16,7 @@ dependencies = [
   "skl2onnx>=1.17",
   # torch>=2.9's default ONNX exporter is dynamo-based and requires this;
   # without it torch.onnx.export raises ModuleNotFoundError at call time.
-  "onnxscript>=0.2",
+  "onnxscript>=0.7.1",
 ]
 
 [dependency-groups]
