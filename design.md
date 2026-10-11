@@ -533,6 +533,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-035 | `services/edge/src/edge/providers/__init__.py`'s `get_provider("simulated")` branch lazily imports `SimulatedSensorProvider` inside the function body, matching the existing lazy-import pattern already used for `"hardware"` | Entry 13 added `edge.providers.simulated`'s import of `edge.features.compute_vibration_features` (so the simulated provider derives its four statistical features from a real raw window via the same function `hardware.py` uses, DD-031's window-shape consistency goal) — but `edge.features` itself imports `edge.providers.base.VibrationFeatures`, and Python always runs a package's `__init__.py` before any of its submodules. The result was a real circular import (`edge.features` → `edge.providers` package init → `edge.providers.simulated` → `edge.features`, still mid-initialization) that broke on any entry point importing `edge.features` first (e.g. `tests/test_features.py`) — never previously exercised because nothing imported `edge.features` directly before this session's `make test` run. Lazy import breaks the cycle without restructuring the module layout |
 | DD-036 | This session's Docker-based verification (`make lint`/`typecheck`/`test`, `docker compose build`, `make train-synthetic`, `docker compose up`) ran on a fresh Ubuntu Docker install where `docker compose run`'s default user is root inside every container, including the `toolbox` container Husky's pre-commit hook shells into (§7.6) — every hook-triggered `git` operation (`lint-staged`'s internal `git stash`) and every bind-mounted write (`services/ml/artifacts/`, `.venv/`, coverage output) left files/`.git` internals root-owned on the host, which then blocked the *next* host-side `git commit` with "insufficient permission for adding an object to repository database." Fixed per-occurrence with a throwaway `docker run --rm -v "$(pwd):/repo" alpine chown -R "$(id -u)":"$(id -g)" /repo` rather than any project-file or git-config change | This is a distinct root cause from the DD-030/Entry-12 Windows/NTFS executable-bit issue (§25) — confirmed in this entry: `.husky/commit-msg`/`.husky/pre-commit`/`scripts/bootstrap.sh` show **zero** mode diff on this Ubuntu checkout (`git diff --summary` clean), so that specific historical concern does not reproduce here and needs no `core.filemode` change. The *new* finding is that Husky's own hook invocation (not the checkout) intermittently reintroduces spurious `+x` bits and root ownership on newly-created tracked files via the same toolbox-container mechanism — worth a future look at running the toolbox container with `--user "$(id -u):$(id -g)"` (tracked as Technical Debt, §26) so host-side git operations never need a manual chown afterward |
 | DD-037 | `pnpm-workspace.yaml`'s `overrides` gained six entries (`fast-uri`, `js-yaml`, `postcss`, `nanoid`, and two parent-scoped `brace-expansion` entries) after PR #61's first CI run failed `pnpm audit --audit-level=high` with newly-disclosed advisories in transitive dev-tooling deps (commitlint→ajv→fast-uri; eslint's own js-yaml/minimatch→brace-expansion chain; vitest coverage's glob→minimatch→brace-expansion chain) — none tied to any code change in this branch, same category as DD-018's pre-existing `vite` override. `brace-expansion` specifically needed **parent-scoped** overrides (`minimatch@3>brace-expansion: "^1.1.18"`, `minimatch@9>brace-expansion: "^2.1.4"`, pnpm's documented `parent@range>child` syntax) rather than a single blanket one | Two real mistakes made and corrected while fixing this, both confirmed by actually re-running `make lint`/`pnpm audit` after each attempt rather than assumed: (1) a blanket `brace-expansion: ">=5.0.9"` override collapsed *every* consumer (including `minimatch@3.1.5`, which calls a `.braceExpand` API only `brace-expansion`'s 1.x line has) onto the newest line, breaking ESLint outright (`TypeError: expand is not a function`) — parent-scoping by consumer, not just the target package, was required. (2) the parent-scoped override still didn't stick until the *target* range was changed from open-ended `>=1.1.18` to caret `^1.1.18` — pnpm resolves an open-ended `>=` range to the newest version satisfying that inequality (5.0.9 numerically satisfies `>=1.1.18`), not "newest within that major line," so it silently reproduced mistake (1) even though the parent scope was correct. `pnpm why brace-expansion` after each attempt is what surfaced both mistakes concretely rather than trusting the override syntax alone |
+| DD-038 | Added `scripts/bootstrap.ps1` and `scripts/make.ps1` as native-Windows (PowerShell, no WSL) equivalents of `scripts/bootstrap.sh` and the `Makefile`'s targets, rather than making WSL2 mandatory or rewriting the onboarding flow around a cross-platform task runner (npm scripts, `just`, etc.) | The user reported the project wouldn't run when the repo was opened on Windows. Root cause (found by inspection, not a repro): `docker compose watch`/`up`/`down`/`build`/`logs`/`ps` are already plain Docker CLI calls and work unmodified on any host OS, but the *onboarding* step (`scripts/bootstrap.sh`) is a bash script and every quality-gate command goes through `make`, and stock Windows ships neither bash nor GNU Make. WSL2 remains the recommended path (full parity, matches how this project has actually been verified per §28 Entries 14/15) and is documented first in the README; the PowerShell scripts are a second, no-WSL-required path for users who want to run the app without installing WSL2 at all. Both `.ps1` files are deliberately line-for-line translations of their bash/Make originals (no added logic, no behavior divergence) specifically so they don't drift into a second, differently-behaved onboarding flow — keep all three in sync on any future change |
 
 ---
 
@@ -799,8 +800,17 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
       still not done; every commit on this branch, including Entry 13/14's, has only ever been
       validated locally, never on GitHub Actions (§29).
 
+- [ ] Verify `scripts/bootstrap.ps1` and `scripts/make.ps1` (added §28 Entry 17, DD-038) on an
+      actual native Windows machine — written and reviewed by inspection only in the session that
+      added them (no PowerShell interpreter available there to execute them); until run for real,
+      treat as a reasoned-but-unverified assumption, not a confirmed fact.
+
 ## 25. Known Issues
 
+- `scripts/bootstrap.ps1`/`scripts/make.ps1` (DD-038) have not been executed on a real Windows
+  machine — the session that wrote them had no PowerShell interpreter to run or lint them against.
+  Written as direct, line-for-line translations of the already-verified `bootstrap.sh`/`Makefile`,
+  but treat as unverified until someone actually runs them on Windows (§24).
 - Mosquitto broker has `allow_anonymous true` and no TLS (DD-016) — acceptable only while the
   broker is unreachable outside the Docker network / Pi-local network.
 - `HardwareSensorProvider.read()` is fully implemented (DD-022) but has only ever run against a
@@ -1883,6 +1893,54 @@ procurement).
 
 ---
 
+### Entry 17 — Windows portability (logical project time: 2026-09-18)
+
+**Task completed:** User reported the project "can't run" when the repo is opened on Windows and
+asked for it to be made portable. Inspection (not a repro — no Windows/PowerShell environment
+available in this session) found the actual gap: `docker compose watch`/`up`/`down`/`build`/`logs`/
+`ps` are already plain Docker CLI calls that work unmodified on any host OS, but onboarding
+(`scripts/bootstrap.sh`) is a bash script and every quality-gate command goes through `make` —
+neither ships with a stock Windows install (no WSL2/Git Bash/choco). Added `scripts/bootstrap.ps1`
+and `scripts/make.ps1` as native-Windows, no-WSL-required equivalents, and documented a "Windows"
+subsection in `README.md`'s Quick start (recommending WSL2 first, for full parity with how this
+project is actually verified per Entries 14/15, with the PowerShell scripts as a no-WSL fallback).
+
+**Files created:** `scripts/bootstrap.ps1`, `scripts/make.ps1`.
+
+**Files modified:** `README.md` (new Windows subsection under Quick start; Common Tasks note),
+`design.md` (this entry; DD-038; §14 Repository Structure; §24 Pending Tasks; §25 Known Issues).
+
+**Files deleted:** None.
+
+**Reason for change:** Direct user request, motivated by a real local failure opening the project
+on Windows.
+
+**Architectural decisions:** DD-038 — native-Windows scripts as line-for-line translations of the
+existing bash/Make onboarding, rather than replacing the onboarding flow with a cross-platform task
+runner or making WSL2 mandatory. See DD-038 for full rationale.
+
+**Remaining work:** None planned beyond verification (below) — this closes the reported gap as
+designed. `.env.example`'s `SECRETS_FILE` default remains a Unix-style path (intentional: it's
+`bootstrap.sh`'s template; `bootstrap.ps1` writes its own Windows-appropriate default directly into
+`.env`, matching how `bootstrap.sh` already overwrites the same placeholder via `sed`).
+
+**Known issues:** `scripts/bootstrap.ps1`/`scripts/make.ps1` have not been executed on a real
+Windows machine — this session has no PowerShell interpreter to run or lint them against. Reviewed
+carefully by hand against PowerShell semantics (quoting, pipeline evaluation order for the
+read-then-overwrite-`.env` step, native-command exit-code propagation) but not empirically verified,
+consistent with this repo's standing rule (§28 Entries 12–14) of treating anything not actually run
+as unverified rather than presented as certain. Added to §24/§25.
+
+**Recommended next task:** Have the user actually run `scripts/bootstrap.ps1` (or `bootstrap.sh`
+under WSL2) on their Windows machine and report back what happens — that either closes §24's new
+verification item outright or surfaces a concrete, reproducible error to fix, which is strictly
+more useful than further inspection without a real Windows host to test against. Independently,
+`design.md`'s Entry 16 addition was still sitting uncommitted in the working tree as of this
+session's start — worth committing alongside this entry's changes if the user wants a clean tree.
+
+---
+
+
 ## 29. Current Repository State
 
 - **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
@@ -1932,6 +1990,9 @@ procurement).
   but its own composite action pinned an internal `setup-trivy` dependency to a tag since deleted
   upstream; `v0.36.0` pins that same dependency by commit SHA. **Confirmed on a real CI run** (Entry
   11), not just locally.
+- **Native-Windows onboarding added** (Entry 17, 2026-09-18, DD-038): `scripts/bootstrap.ps1` and
+  `scripts/make.ps1` let the project run on Windows without WSL2/Git Bash/GNU Make — line-for-line
+  translations of `bootstrap.sh`/`Makefile`, unverified on real Windows (§24, §25).
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
