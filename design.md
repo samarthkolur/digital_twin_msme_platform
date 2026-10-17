@@ -552,6 +552,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-041 | `HardwareSensorProvider` asserts the ADXL345 `DEVID` register reads `0xE5` before configuring the part, and both sampling loops (the 64-sample vibration burst and `edge.main.publish_loop`) pace against a running deadline instead of sleeping a fixed interval after each unit of work | Bench bring-up on the real Pi found that a press-fitted (unsoldered) breakout header returns a well-formed all-zero identity while supply rails measure correct, so the fault surfaced as plausible-looking zero data rather than an error — the identity gate turns it into a startup failure with a wiring hint. The fixed-sleep loops made acquisition time additive: measured 751 Hz for a configured 800 Hz burst, and a 6.00 s publish period for a configured 5 s (the DS18B20's ~750 ms conversion). Deadline pacing removes that drift; a cycle that overruns pushes the next deadline forward rather than bursting to catch up |
 | DD-042 | Real-dataset loaders and an RUL regressor land as standalone `ml` modules (`cwru_metadata`, `cwru_loader`, `ims_loader`, `rul`) with their own unit tests, ahead of — and separately from — wiring them into `ml.pipeline` | These are carved out of a larger in-progress backlog (local `wip/full-backlog` stash) so they can be reviewed and CI-gated on their own. `scipy` becomes a direct runtime dependency (CWRU ships MATLAB `.mat` files); `onnxruntime` is a dev-only dependency so `test_rul` can round-trip the exported `rul.onnx` through a real inference session. `ml.pipeline`'s real-CWRU branch is still the DD-031 `NotImplementedError` until the wiring change lands (§24). The backlog stash numbers its own decisions DD-038–DD-044 against a different design.md; those numbers are **not** these — renumber when that work is merged |
 | DD-043 | The research paper is kept in-repo under `docs/research/` as LaTeX source (`digital_cousin_paper.tex`) plus its compiled PDF, a `.docx` export, and generated figures; figures are reproducible via `services/ml/scripts/make_paper_figures.py` (run with `uv run --with matplotlib --with seaborn --with onnxruntime`) rather than hand-made | Keeps the paper's numbers traceable to the same loaders/artifacts the code uses. Plotting libraries are pulled in ad hoc instead of becoming `ml` dependencies, since nothing in training or inference needs them; mypy ignores their missing stubs. LaTeX intermediates (`*.aux`, `*.log`) and local draft backups (`*.bak`) are gitignored, as is a root-owned duplicate `docs/research/.figures-rootowned/` left by a pre-DD-039 container run (cannot be removed without root). The committed PDF was compiled before the last `.tex` edits — rebuild it before submission |
+| DD-044 | Cleared a second wave of dependency-audit failures (found before pushing Entry 18) by **upgrading the parent tool** wherever no patched release exists on the line the parent accepts, and by overrides otherwise: `knip` 5 → 6 and `lint-staged` 15 → 16 (both drop `micromatch`→`braces`, whose advisory has no patched release at all), `vitest`/`@vitest/coverage-v8` 3.2 → 4.1 (drops `tinypool` 1.x, two critical advisories patched only in 2.x); raised `pnpm-workspace.yaml` overrides for `fast-uri`, `js-yaml`, all three `brace-expansion` lines (`minimatch@3`/`@9`/`@10`), `browserslist`, `baseline-browser-mapping`, `source-map-js`, `smol-toml`; `anyio` 4.14.1 → 4.14.2 in the `edge`/`api`/`copilot` locks | Same category as DD-037 — advisories disclosed after PR #61, unrelated to any code change. Forcing `tinypool` 2 under vitest 3 or a nonexistent `braces` 3.0.4 by override would either break the parent or not resolve at all, so the parent upgrade is the only real fix. knip 6 flagged `VibrationFeatures` in `apps/dashboard/src/api.ts` as an unused export; the `export` was dropped (only used in that file). lint-staged 16 requires Node ≥22.22.1 — the toolbox's `node:22-slim` and CI's `NODE_VERSION: "22"` both resolve newer. Verified locally: frozen install, `pnpm audit --audit-level=high` clean, lint/typecheck/test/knip pass, `pip-audit` clean for all four services |
 
 ---
 
@@ -1996,22 +1997,26 @@ CI-gated commits, one per change:
 `docs/research/figures/*`.
 
 **Files modified:** `.husky/{pre-commit,commit-msg}`, `Makefile`, `docker-compose.yml`,
-`docker/tools.Dockerfile`, `.env.example`, `.gitignore`, `README.md`,
+`docker/tools.Dockerfile`, `.env.example`, `.gitignore`, `README.md`, `package.json`,
+`apps/dashboard/{package.json,src/api.ts}`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`,
+`services/{edge,api,copilot}/uv.lock`,
 `services/edge/src/edge/{main.py,providers/hardware.py}`,
 `services/edge/tests/test_hardware_provider.py`, `services/ml/{pyproject.toml,uv.lock}`, `design.md`
-(§14, §15 DD-038–DD-043, §17, §24, §25, §26, §28, §29).
+(§14, §15 DD-038–DD-044, §17, §24, §25, §26, §28, §29).
 
 **Files deleted:** `scripts/bootstrap.ps1`, `scripts/make.ps1`.
 
 **Reason for change:** Clear the accumulated working tree into segregated commits and get it merged
 to `main` through green CI.
 
-**Architectural decisions:** DD-039 through DD-043. Decision numbers continue from this file's
+**Architectural decisions:** DD-039 through DD-044 (DD-044: dependency-audit fixes — anyio lock
+bumps, knip 6, vitest 4.1, lint-staged 16, and refreshed pnpm overrides, each its own commit). Decision numbers continue from this file's
 DD-038; the `wip/full-backlog` stash carries its own, conflicting DD-038–DD-044 numbering, noted in
 DD-042 so it is renumbered on merge.
 
 **Verification:** Locally, `ruff check`/`ruff format --check`/`mypy .`/`pytest` pass for `edge`
-(28 tests) and `ml` (51 tests, 96% coverage), and `docker compose config` passes with both overlays.
+(28 tests) and `ml` (51 tests, 96% coverage), `docker compose config` passes with both overlays,
+hadolint passes on `docker/tools.Dockerfile`, and the TypeScript gate plus both audits pass (DD-044).
 CI on the pushed branch is the gate for merge (§29).
 
 **Remaining work:** Wire DD-042's loaders and the RUL regressor into `ml.pipeline` and commit the
@@ -2020,7 +2025,7 @@ dataset download script; verify the GPIO buzzer on real hardware; rebuild the pa
 **Known issues:** See §25 (stale paper PDF, root-owned figures leftover).
 
 **Recommended next task:** Carve the `ml.pipeline` wiring + `scripts/download_data.py` out of the
-`wip/full-backlog` stash as the next branch, renumbering its design decisions from DD-044.
+`wip/full-backlog` stash as the next branch, renumbering its design decisions from DD-045.
 
 ---
 
@@ -2077,7 +2082,8 @@ dataset download script; verify the GPIO buzzer on real hardware; rebuild the pa
   `scripts/bootstrap.ps1`/`scripts/make.ps1` no longer exist; Windows hosts use WSL2.
 - **Entry 18 (2026-10-17)** merged `feat/windows-portability` into `main` via PR: toolbox runs as the
   host user (DD-039), edge audible alerting (DD-040), ADXL345 identity gate + deadline pacing
-  (DD-041), CWRU/IMS loaders + RUL regressor modules (DD-042), research paper sources (DD-043).
+  (DD-041), CWRU/IMS loaders + RUL regressor modules (DD-042), research paper sources (DD-043),
+  dependency-audit fixes incl. knip 6 / vitest 4.1 / lint-staged 16 (DD-044).
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
