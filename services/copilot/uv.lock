@@ -133,7 +133,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.139.2" },
     { name = "httpx", specifier = ">=0.27" },
-    { name = "llama-cpp-python", marker = "extra == 'local-llm'", specifier = ">=0.3.2" },
+    { name = "llama-cpp-python", marker = "extra == 'local-llm'", specifier = ">=0.3.34" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
@@ -307,7 +307,7 @@ wheels = [
 
 [[package]]
 name = "llama-cpp-python"
-version = "0.3.33"
+version = "0.3.36"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "diskcache" },
@@ -315,7 +315,7 @@ dependencies = [
     { name = "numpy" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/5c/ca0eb0a3cd91918620dbcbefe46ef90335f75c62be8198a9e93fd2b9bb0f/llama_cpp_python-0.3.33.tar.gz", hash = "sha256:369ba03d02caaef42c1ed07bbdc454f7436e47c7675b8b9757fa13fbac6acd92", size = 70533021 }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/e9/e7de2b0463ea3ffbf0ede6cb21b58c1258a8f6521aae45ca773a59fe7cf3/llama_cpp_python-0.3.36.tar.gz", hash = "sha256:832db0699007f1be95a7e41ef12e88926b02ba836461e36a36372db2760c1a2e", size = 76589250 }
 
 [[package]]
 name = "markupsafe"
