@@ -59,6 +59,16 @@ updates:
       python-dependencies:
         patterns: ["*"]
 
+  - package-ecosystem: pip
+    directory: /services/config
+    schedule:
+      interval: weekly
+    # One PR per service instead of one per package: these bumps only raise
+    # pyproject floors to what uv.lock already resolves (design.md DD-046).
+    groups:
+      python-dependencies:
+        patterns: ["*"]
+
   - package-ecosystem: docker
     directory: /apps/dashboard
     schedule:
@@ -101,6 +111,16 @@ updates:
 
   - package-ecosystem: docker
     directory: /services/ml
+    schedule:
+      interval: weekly
+    ignore:
+      # Python is pinned to 3.11 to match Raspberry Pi OS (design.md §7) and
+      # every service's requires-python "<3.12" (DD-045).
+      - dependency-name: "python"
+        versions: [">=3.12"]
+
+  - package-ecosystem: docker
+    directory: /services/config
     schedule:
       interval: weekly
     ignore:

@@ -429,7 +429,15 @@ The following limitations are explicitly acknowledged to maintain academic integ
 │   │       ├── storage.py        StateReader — reads `state_history` (DD-026, schema
 │   │       │                     duplicated from edge/storage.py, no shared package)
 │   │       └── main.py            GET /state/current, GET /state/history
-│   ├── copilot/             Retrieval-grounded NL copilot (FastAPI, implemented §28 Entry 13)
+│   ├── config/              Project-wide runtime config service (FastAPI + SQLite, DD-047)
+│   │   └── src/appconfig/
+│   │       ├── schema.py         AppConfig (enablePhase2, publishIntervalSeconds, alertHealthIndex,
+│   │       │                     alertTemperatureC) + env seeding
+│   │       ├── store.py          ConfigStore — owns the `app_config` table (one row per setting)
+│   │       ├── main.py           GET/PATCH /config, GET /health
+│   │       └── cli.py            show / set / profiles — used by the Makefile to pick Compose profiles
+│   ├── copilot/             Retrieval-grounded NL copilot (FastAPI, implemented §28 Entry 13;
+│   │                        Phase 2 only — `phase2` Compose profile, /query 503 while off, DD-047)
 │   │   └── src/copilot/
 │   │       ├── retrieval.py      fetches recent state objects from api
 │   │       ├── context.py        freshness/OOD context validity check (§6.4)
@@ -555,6 +563,8 @@ FastAPI services; ml is an on-demand training job).
 | DD-044 | Cleared a second wave of dependency-audit failures (found before pushing Entry 18) by **upgrading the parent tool** wherever no patched release exists on the line the parent accepts, and by overrides otherwise: `knip` 5 → 6 and `lint-staged` 15 → 16 (both drop `micromatch`→`braces`, whose advisory has no patched release at all), `vitest`/`@vitest/coverage-v8` 3.2 → 4.1 (drops `tinypool` 1.x, two critical advisories patched only in 2.x); raised `pnpm-workspace.yaml` overrides for `fast-uri`, `js-yaml`, all three `brace-expansion` lines (`minimatch@3`/`@9`/`@10`), `browserslist`, `baseline-browser-mapping`, `source-map-js`, `smol-toml`; `anyio` 4.14.1 → 4.14.2 in the `edge`/`api`/`copilot` locks | Same category as DD-037 — advisories disclosed after PR #61, unrelated to any code change. Forcing `tinypool` 2 under vitest 3 or a nonexistent `braces` 3.0.4 by override would either break the parent or not resolve at all, so the parent upgrade is the only real fix. knip 6 flagged `VibrationFeatures` in `apps/dashboard/src/api.ts` as an unused export; the `export` was dropped (only used in that file). lint-staged 16 requires Node ≥22.22.1 — the toolbox's `node:22-slim` and CI's `NODE_VERSION: "22"` both resolve newer. Verified locally: frozen install, `pnpm audit --audit-level=high` clean, lint/typecheck/test/knip pass, `pip-audit` clean for all four services |
 | DD-045 | Resolved the 30 open Dependabot PRs by re-applying every viable update as its own commit on one branch (`chore/dependabot-updates`) rather than merging the bot PRs individually, then closing all 30 as superseded and deleting their branches. **Taken:** all 15 pip floor bumps (edge: fastapi ≥0.141.1, uvicorn ≥0.52.3, onnxruntime ≥1.29, mypy ≥2.3.1, pytest ≥9.1.1; ml: scikit-learn ≥1.9, pandas ≥3.0.5, onnxscript ≥0.7.1, mypy ≥2.3.1, pytest ≥9.1.1; copilot: fastapi ≥0.139.2, llama-cpp-python ≥0.3.34, mypy ≥2.3, pytest ≥9.1.1, pytest-cov ≥7.1), each re-locked; actions/checkout, setup-node and setup-uv v7, hadolint-action 3.3.0, gitleaks-action v3; nginx 1.29-alpine; React/react-dom 19.3; prettier 3.9, typescript-eslint 8.70, Testing Library react 16.3 / jest-dom 7, commitlint 21, lint-staged 17, eslint-config-prettier 10, react-hooks plugin 7, globals 17, Vite 8 + plugin-react 6 + Vitest 5 + jsdom 30 (the workspace `vite` override moved to `^8.3.0` with them). **Declined, with `ignore` rules in `.github/dependabot.yml`:** Python 3.12 base images (every service pins `requires-python <3.12` to match Raspberry Pi OS, §7); Node 25 (non-LTS; stay on 22 LTS); ESLint/`@eslint/js` 10 (latest `eslint-plugin-react` 7.37.5 and `eslint-plugin-jsx-a11y` 6.10.2 crash or declare no support — confirmed by running lint); TypeScript 7 (typescript-eslint 8.71 peer range is `<6.1`), taken as **TypeScript 6.0** instead, the newest supported line | Merging 30 bot PRs one by one would have meant 30 rebases and CI runs, and most were red only because of the pre-DD-044 audit failures on `main`. Each update was gated on its own before committing: pip bumps via ruff/mypy/pytest for that service, npm bumps via the full toolbox TypeScript gate (frozen install, prettier, lint, typecheck, test, knip, `pnpm audit`); dashboard dev/prod images built locally after Vite 8. The ignore rules carry their removal condition inline so they are revisited rather than forgotten (§26) |
 | DD-046 | Dependabot pip and GitHub Actions updates are **grouped** (`groups:` with `patterns: ["*"]`): one PR per Python service directory and one for all workflow actions. Edge test stub ONNX models are built with an explicit `ir_version=10` (`STUB_IR_VERSION` in `services/edge/tests/test_ml_inference.py`) instead of the `onnx` library default | Merging DD-045's config change made Dependabot rescan at once and open 14 more single-package PRs. 13 of them only raised `pyproject.toml` floors to versions `uv.lock` already resolved, so per-package PRs were noise. One of those bumps (`onnx` ≥1.23.2 in edge) exposed a real incompatibility: onnx 1.23 stamps models with IR 14 by default, and onnxruntime 1.31 (the edge runtime) loads at most IR 13. This only affected the hand-built test stubs. The real `ml` exporters set their own IR version: a synthetic-pipeline run with onnx 1.23.2 produced `autoencoder.onnx` at IR 10 and `isolation_forest.onnx` at IR 8, and both load in onnxruntime 1.31 |
+| DD-047 | **One project-wide runtime config, owned by a new `config` microservice**, with an `enablePhase2` flag that switches the whole system between Phase 1 only (default) and Phase 1 + Phase 2. The `config` service (`services/config`, port 8002) owns an `app_config` table (one row per setting) in the shared SQLite volume and serves `GET`/`PATCH /config` (camelCase, pydantic-validated). Settings: `enablePhase2`, `publishIntervalSeconds`, `alertHealthIndex`, `alertTemperatureC`. A fresh database is seeded from defaults plus the matching env vars (`ENABLE_PHASE2`, …), after which the database wins, and reseeding never overwrites a stored value. Phase mapping follows the academic plans (`docs/phase-plans` branch): **Phase 1 = edge monitoring & digital shadow** (sensing, MQTT, SQLite, api, threshold dashboard); **Phase 2 = AI-enabled digital cousin** (ML inference, `ml-trainer`, copilot, ML dashboard views). Gating is enforced at every layer. (1) **edge** re-reads the config every cycle (5 s cache) and loads ML models only while the flag is on (`edge.phase2.Phase2Inference`), so the ML fields stay null in Phase 1; publish interval and alert thresholds also come from the config. (2) **copilot** sits behind a `phase2` Compose profile and returns 503 on `/query` while the flag is off. (3) **dashboard** polls the config, hides every Phase 2 view, clears ML fields from stored readings before display, and adds a settings panel and a copilot panel. (4) **Makefile** `up`/`watch` read the flag through the config CLI to choose Compose profiles and remove a stale copilot when Phase 2 is off; `phase2-on`/`phase2-off`/`config` targets; `train*` refuse while Phase 2 is off. | Settings were scattered env vars, some duplicated across tiers: the alert thresholds lived in edge env and dashboard constants, and the 5 s interval in edge env plus a dashboard constant. A dedicated service keeps a single writer for the table and a clean HTTP boundary; folding it into `api` would mix a read-only state API with config writes. Bootstrap and infrastructure settings (DB path, broker, ports, secrets) deliberately stay in env, because a service needs them before it can reach the config. Consumers fall back to their env defaults and then to the last known config when the service is down, so monitoring never stops on a config outage; the clients are stdlib-only. The edge and copilot copies of the client are duplicated per DD-002 (no shared Python package). Containers can only follow the flag on `make up`: the browser can't start the copilot container, and giving it Docker access would be a far larger risk. The dashboard therefore says when the copilot isn't running, and the settings panel says `make up` is needed after a phase change. Verified live: in Phase 1 there's no copilot, null ML fields and the Phase 1 dashboard; toggling from the dashboard switched the edge to ML inference and the dashboard to Phase 2 views within one cycle, with no restart; `make phase2-on` started copilot and a real `/query` answered; `make phase2-off` removed it and the ML fields went null again; `make train-synthetic` refused while off |
+| DD-048 | **The working copy lives on a native Linux filesystem (ext4, `~/work/digital_twin_msme_platform`), not on the NTFS data partition.** The NTFS checkout at `/media/samarth/DataFiles5/…/Major Project` is retired. It was left in place untouched, but no further writes should go to it | Root cause of the repeated hangs in Entries 20–22 (stuck `git`, stale `.git/*.lock` files, a frozen `ruff format`, an unplanned reboot): a **known regression in the Linux 7.0 in-kernel `ntfs3` driver**. From 7.0, ntfs3 does buffered writes through the generic `iomap` layer. Files small enough to be stored *resident* inside their MFT record are handed to iomap as inline mappings with a bad length, which trips `kernel BUG at fs/iomap/buffered-io.c:1061` in `iomap_write_end`. Git's refs, lock files and index updates are exactly such tiny files: 6 of the 7 kernel BUGs logged since kernel 7.0.0-31 was installed (Sep 18) came from `git` and 1 from `ruff`, across 4 boots, all on that kernel. No BUG appears on boots with no heavy repo writes. Ubuntu has a matching report on 7.0.0-28 (parallel build load). Fixes are proposed on the ntfs3 list, but none is confirmed merged for 7.0. The kernel can't be fixed from this project, so the repo avoids the code path instead. Cloning only *reads* from NTFS (the bug is in the write path), so the move itself was safe: full history, every local branch, the top stash entry, `.env`, the 6.3 GB datasets, the model artifacts and the paper drafts were all carried over. Alternatives, for the rest of that partition, are host-level and left to the owner: mount it with the userspace `ntfs-3g` driver instead of `ntfs3`, or boot the installed 6.17 kernel, whose ntfs3 predates the iomap conversion. ext4 also gives the repo real POSIX permissions, which removes the class of exec-bit/ownership issues seen in DD-030/DD-036 |
 
 ---
 
@@ -586,13 +596,17 @@ No dependency has been added without a corresponding line item above and, where 
 | `SENSOR_PROVIDER` | `edge` | `simulated` (dev) / `hardware` (prod, via `docker-compose.prod.yml`) | Selects the `SensorProvider` implementation (DD-003) |
 | `ASSET_ID` | `edge`, `api` | `motor_01` | Pilot-machine identifier (§6.0 state model); MQTT topic segment (DD-025), `raw_readings`/`state_history` row key, and `api`'s default `/state/*` query param |
 | `MQTT_HOST` / `MQTT_PORT` | `edge` | `mosquitto` / `1883` | MQTT broker address on the Docker network |
-| `PUBLISH_INTERVAL_SECONDS` | `edge` | `5` | How often the publish loop reads the active provider and logs/publishes a reading (DD-023) |
+| `PUBLISH_INTERVAL_SECONDS` | `edge`, `config` (seed) | `5` | Publish period (DD-023). Since DD-047 the live value is the config's `publishIntervalSeconds`; this env var seeds it and is the edge's fallback |
 | `DATABASE_PATH` | `edge`, `api` | `/data/digital_cousin.sqlite3` | SQLite file inside the shared `sqlite-data` named volume; defaults to `:memory:` if unset (DD-024) |
 | `ML_ARTIFACTS_DIR` | `edge` | `/app/ml-artifacts` | Where `edge.ml_inference.MLInferenceEngine` looks for `services/ml`'s exported `manifest.json`/ONNX models (DD-031); mounted read-only from the same host path `ml-trainer` writes into. Absent until a training run has happened — inference is disabled (null fields), not a startup failure |
 | `BUZZER` | `edge` | `none` | `none` = silent `NullBuzzer`; `gpio` = `GpioBuzzer` on a Pi (DD-040). Passed through by `docker-compose.yml` |
 | `BUZZER_GPIO_PIN` | `edge` | `18` | BCM pin driving the buzzer when `BUZZER=gpio` (DD-040) |
-| `ALERT_HEALTH_INDEX` / `ALERT_TEMPERATURE_C` | `edge` | `0.6` / `70` | Audible-alert thresholds, defaults matching the dashboard's (DD-040); the temperature value is an uncalibrated placeholder (§24). Not passed through by compose yet — set in the service environment directly if needed |
+| `ALERT_HEALTH_INDEX` / `ALERT_TEMPERATURE_C` | `edge`, `config` (seed) | `0.6` / `70` | Alert thresholds (DD-040). Since DD-047 the live values are the config's `alertHealthIndex`/`alertTemperatureC`, shared by edge and dashboard; these env vars only seed them and act as the edge's fallback. The temperature value is an uncalibrated placeholder (§24) |
 | `TOOLBOX_UID` / `TOOLBOX_GID` | `toolbox` (compose variable substitution) | `0` / `0` | Container user for quality gates and git hooks; the `Makefile` and Husky hooks export the host's `id -u`/`id -g` (DD-039) |
+| `ENABLE_PHASE2` | `config` (seed), `edge`/`copilot` (fallback) | `false` | Seeds the stored `enablePhase2` on a fresh database; afterwards the database is authoritative (DD-047). In `edge`/`copilot` it's only the fallback until the config service first answers |
+| `CONFIG_URL` | `edge`, `copilot` | `http://localhost:8002` (compose: `http://config:8002`) | Where the runtime config is fetched from (DD-047) |
+| `VITE_CONFIG_URL` | `dashboard` | `http://localhost:8002` | Browser-facing URL of the config service |
+| `VITE_COPILOT_URL` | `dashboard` | `http://localhost:8001` | Browser-facing URL of the copilot, used by the Phase 2 copilot panel |
 | `COPILOT_LLM_MODE` | `copilot` | `local` | `local` = TinyLlama/llama.cpp (no secrets); `api` = Anthropic/OpenAI fallback |
 | `LOCAL_LLM_MODEL_PATH` | `copilot` | `/app/models/tinyllama-1.1b-q4_k_m.gguf` | GGUF weights path for `COPILOT_LLM_MODE=local` — not yet downloaded/mounted anywhere (§24); `LocalLlamaClient` raises a clear error if missing rather than silently falling back |
 | `COPILOT_API_PROVIDER` | `copilot` | `anthropic` | `anthropic` or `openai` — which API-fallback provider `COPILOT_LLM_MODE=api` uses |
@@ -621,6 +635,11 @@ automatically by the `Makefile`/hooks).
 ---
 
 ## 19. Infrastructure & Deployment
+
+**Phase switch (DD-047):** `make up`/`make watch` read `enablePhase2` from the config database and
+start the `phase2` Compose profile (the copilot) only when it's on; `make phase2-on`/`phase2-off`
+flip it and reconcile the containers. Plain `docker compose watch` starts Phase 1 only. In
+production, add `--profile phase2` when Phase 2 is enabled.
 
 **Local development:** `docker compose watch` — five services (`mosquitto`, `edge`, `api`,
 `copilot`, `dashboard`) rebuild/sync automatically on file changes via `develop.watch` blocks in
@@ -839,14 +858,20 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
 
 ## 25. Known Issues
 
+- Enabling Phase 2 from the dashboard (or `PATCH /config`) switches running services at once, but
+  doesn't start the copilot container. That needs `make up` or `make phase2-on`, by design
+  (DD-047). The dashboard says so.
+- `make up` reuses existing images (unchanged behaviour). After pulling code that changes a
+  service, run `make build` first. Entry 22's live test hit this: a weeks-old edge image ignored
+  the flag until it was rebuilt.
+
 - ~~`scripts/bootstrap.ps1`/`scripts/make.ps1` (DD-038) unverified on real Windows~~ — **resolved
   by removal** (Entry 18); the scripts no longer exist.
-- **Host environment:** this checkout lives on an NTFS partition (`/media/samarth/DataFiles5`,
-  `ntfs3` driver, kernel 7.0.0-31). Entry 20 recorded two kernel BUGs in that driver's write path
-  triggered by `git` writes, leaving unkillable processes and stale `.git/index.lock` files until a
-  reboot. This is a host/kernel issue, not a project one. Keep the working copy on a native Linux
-  filesystem (e.g. ext4 under `$HOME`) to avoid it. If it recurs here, reboot and run `git fsck`
-  before continuing.
+- **Host environment — resolved by relocation (DD-048):** the old checkout on the NTFS partition
+  kept crashing the kernel's `ntfs3` driver (a Linux 7.0 iomap regression on tiny resident files,
+  hit by git's refs and locks). The working copy now lives on ext4 at
+  `~/work/digital_twin_msme_platform`; don't develop on the NTFS copy. Anything else written to
+  that partition is still exposed until it's mounted with `ntfs-3g` or the kernel gets a fix.
 - `docs/research/digital_cousin_paper.pdf` was compiled before the final `.tex` edits (DD-043) —
   rebuild before treating it as the submission copy.
 - `docs/research/.figures-rootowned/` (gitignored) is a root-owned leftover from a pre-DD-039
@@ -909,6 +934,12 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
 - ESLint is held at 9 and TypeScript at 6.0 by `.github/dependabot.yml` ignore rules (DD-045)
   because `eslint-plugin-react`/`eslint-plugin-jsx-a11y` don't support ESLint 10 and
   typescript-eslint doesn't support TypeScript 7. Lift the rules when upstream catches up.
+- `PATCH /config` is unauthenticated and its CORS policy allows any origin. That's acceptable only
+  under the same LAN-only assumption as api's CORS and Mosquitto (DD-027, DD-016). Anyone on the LAN
+  can flip `enablePhase2`. Add auth before any wider exposure.
+- The runtime config client is duplicated in `edge` and `copilot` (`runtime_config.py`, logic
+  identical, DD-002), as is the `AppConfig` shape in `services/config` and
+  `apps/dashboard/src/config.ts`. Change all of them together.
 - SensorRAG's numeric-grounding check (DD-033) verifies a claimed number is present in the retrieved
   context, not that it's attributed to the *correct* field — a response could quote a real context
   number but apply it to the wrong claim and still pass. Full claim-level semantic grounding needs
@@ -2139,6 +2170,95 @@ mypy and pytest before committing.
 
 ---
 
+### Entry 22 — Project-wide config and the enablePhase2 switch (logical project time: 2026-10-17, same day)
+
+**Task completed:** User asked whether a project config existed in the database (it didn't —
+settings were scattered env vars) and asked for a global one with an `enablePhase2` flag. With the
+flag off only Phase 1 should be shown and running; with it on, Phase 2 should be shown and working
+too. Microservices were to be used where they help. Implemented per DD-047:
+- a new `config` microservice;
+- edge, copilot and dashboard gating;
+- the `phase2` Compose profile and Makefile targets;
+- CI and Dependabot coverage for the new service.
+
+**Files created:** `services/config/**` (schema, store, API, CLI, 14 tests, Dockerfile, lock),
+`services/edge/src/edge/{runtime_config,phase2}.py` + tests,
+`services/copilot/src/copilot/runtime_config.py` + test,
+`apps/dashboard/src/{config,copilot}.ts`,
+`apps/dashboard/src/components/{SettingsPanel,CopilotPanel}.tsx` + tests,
+`apps/dashboard/src/config.test.ts`.
+
+**Files modified:** `services/edge/src/edge/{main,alerting}.py`,
+`services/edge/tests/test_publish_loop.py`, `services/copilot/src/copilot/main.py` + test,
+`apps/dashboard/src/{App,App.test,thresholds,vite-env.d}.ts(x)`,
+`apps/dashboard/src/components/HistoryLog{,.test}.tsx`,
+`docker-compose{,.prod}.yml`, `Makefile`, `.env.example`, `ruff.toml` (first-party `appconfig`),
+`.github/workflows/ci.yml`, `.github/dependabot.yml`, `README.md`, `design.md`.
+
+**Files deleted:** None.
+
+**Reason for change:** Direct user request.
+
+**Architectural decisions:** DD-047.
+
+**Verification:**
+- **Unit tests:** config 14 tests at 97% coverage, edge 36, copilot 38, dashboard 49. mypy strict,
+  ruff, eslint, tsc, knip and prettier are all clean. hadolint is clean and the config prod image
+  reports healthy.
+- **Live run (full stack):** default Phase 1 showed no copilot container, null ML fields and the
+  Phase 1 dashboard.
+- **Toggle from the dashboard Settings panel:** the edge produced ML output (health index 0.82) and
+  the dashboard switched to the Phase 2 views within one cycle, with no restart.
+- **`make phase2-on`:** copilot started and `/query` answered (rule-based fallback; no LLM
+  weights, §24).
+- **`make phase2-off`:** copilot was removed, the ML fields went null again, and
+  `make train-synthetic` refused.
+- **Bug found and fixed:** on a cold start, build output from `docker compose run config` leaked
+  into the captured profile name, so the stale copilot wasn't removed. The Makefile now builds the
+  config image quietly first and validates the CLI output.
+
+**Environment notes (not project issues):**
+- **Port conflict:** host port 8000 was held by an unrelated project's container on this
+  machine, so the live test remapped `api` to 18000 with a throwaway override file, not committed.
+- **Stale images:** the first test run used weeks-old images (§25).
+
+**Remaining work:** none for this feature. Possible follow-ups: auth on `PATCH /config` (§26), and
+moving more runtime settings into the config as they become operator-tunable.
+
+**Recommended next task:** Unchanged from Entry 18 — wire the DD-042 loaders into `ml.pipeline`.
+
+---
+
+### Entry 23 — ntfs3 kernel crashes: root cause and relocation (logical project time: 2026-10-17, same day)
+
+**Task completed:** User asked why the git hangs kept happening and to fix or avoid the cause
+permanently. Root cause (DD-048): a Linux 7.0 `ntfs3` regression, where resident (tiny) files written
+through iomap trip `kernel BUG at fs/iomap/buffered-io.c:1061`. The evidence is the per-boot
+journals (7 BUGs, all on 7.0.0-31; 6 from `git`, 1 from `ruff`), matching upstream and distro
+reports. The working copy was moved to ext4 at `~/work/digital_twin_msme_platform` by a read-only
+clone plus an rsync of every untracked file worth keeping, and DD-047's branch was pushed from there
+as PR #102.
+
+**Files created / modified / deleted:** `design.md` only (DD-048, §25, this entry, §29). No
+project code changed.
+
+**Reason for change:** Recurring kernel crashes on every heavy repo write were blocking work and
+risking corruption.
+
+**Architectural decisions:** DD-048.
+
+**Remaining work (host-level, owner's call):**
+- Mount the NTFS data partition with `ntfs-3g`, or boot the 6.17 kernel, if other work still
+  writes there.
+- Reboot once to clear the `git` process still stuck in `D` state on the old checkout.
+- Delete the old checkout once nothing else is needed from it.
+- The old checkout's local `main` is 8 commits ahead of `origin/main`. Those commits are the ones on
+  `feat/phase-config`, so nothing is lost if it's discarded.
+
+**Recommended next task:** Unchanged — wire the DD-042 loaders into `ml.pipeline`.
+
+---
+
 ## 29. Current Repository State
 
 - **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
@@ -2200,6 +2320,11 @@ mypy and pytest before committing.
   groups pip (per service) and Actions updates (DD-046).
 - **Entry 21 (2026-10-17)**: first grouped Dependabot round (#97–#100) applied; no Dependabot PRs
   or branches open afterwards.
+- **Entry 22 (2026-10-17)**: project-wide config service with the `enablePhase2` switch (DD-047).
+  Phase 1 only by default; Phase 2 (ML inference, copilot, ML dashboard views) runs only while
+  it's on.
+- **Working copy location (Entry 23, DD-048):** `~/work/digital_twin_msme_platform` on ext4. The
+  old NTFS checkout is retired.
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-

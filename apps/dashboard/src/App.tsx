@@ -5,13 +5,15 @@ import { TrendChart } from "./components/TrendChart";
 import { AlertsPanel } from "./components/AlertsPanel";
 import { HistoryLog } from "./components/HistoryLog";
 import { RoiEstimator } from "./components/RoiEstimator";
+import { SettingsPanel } from "./components/SettingsPanel";
+import { CopilotPanel } from "./components/CopilotPanel";
 import {
-  DEFAULT_HEALTH_INDEX_ALERT_THRESHOLD,
-  DEFAULT_TEMPERATURE_ALERT_THRESHOLD_C,
-} from "./thresholds";
-
-// Matches the edge service's default PUBLISH_INTERVAL_SECONDS (design.md §17).
-const POLL_INTERVAL_MS = 5000;
+  DEFAULT_CONFIG,
+  fetchConfig,
+  updateConfig,
+  withoutPhase2Fields,
+  type AppConfig,
+} from "./config";
 // api's GET /state/history caps at 1000 rows (services/api/src/api/main.py
 // Query(le=1000)) — this is the largest window both the trend charts and the
 // historical log can show without api gaining pagination/time-range support.
@@ -25,11 +27,32 @@ type LoadState =
 
 export function App(): JSX.Element {
   const [load, setLoad] = useState<LoadState>({ status: "loading" });
+  const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG);
+  const [configReachable, setConfigReachable] = useState(true);
+
+  // Poll at the edge's publish interval, which now comes from the config
+  // service (design.md DD-047); re-arms when that setting changes.
+  const pollIntervalMs = config.publishIntervalSeconds * 1000;
 
   useEffect(() => {
     let cancelled = false;
 
+    async function pollConfig(): Promise<void> {
+      try {
+        const latest = await fetchConfig();
+        if (!cancelled) {
+          setConfig(latest);
+          setConfigReachable(true);
+        }
+      } catch {
+        // Keep the last known config (Phase 1 defaults before the first
+        // answer) rather than flipping features on and off with the network.
+        if (!cancelled) setConfigReachable(false);
+      }
+    }
+
     async function poll(): Promise<void> {
+      void pollConfig();
       try {
         const [state, history] = await Promise.all([
           fetchCurrentState(),
@@ -50,16 +73,30 @@ export function App(): JSX.Element {
     }
 
     void poll();
-    const intervalId = setInterval(() => void poll(), POLL_INTERVAL_MS);
+    const intervalId = setInterval(() => void poll(), pollIntervalMs);
     return () => {
       cancelled = true;
       clearInterval(intervalId);
     };
-  }, []);
+  }, [pollIntervalMs]);
+
+  async function saveConfig(changes: Partial<AppConfig>): Promise<void> {
+    setConfig(await updateConfig(changes));
+  }
+
+  const phase2 = config.enablePhase2;
+  // In Phase 1 every view sees the state without its ML fields.
+  const view = (s: DigitalTwinState): DigitalTwinState => (phase2 ? s : withoutPhase2Fields(s));
 
   return (
     <main>
       <h1>Digital Cousin</h1>
+      <p aria-label="Active phase">
+        {phase2 ? "Phase 1 + Phase 2 (AI-enabled digital cousin)" : "Phase 1 (edge monitoring)"}
+      </p>
+      {!configReachable && (
+        <p role="status">Config service unreachable — showing the last known settings.</p>
+      )}
       {load.status === "loading" && <p>Loading current machine state…</p>}
       {load.status === "no-data" && <p>No sensor data recorded yet.</p>}
       {load.status === "error" && <p role="alert">Could not reach the API: {load.message}</p>}
@@ -80,7 +117,7 @@ export function App(): JSX.Element {
               <dt>Temperature</dt>
               <dd>{load.state.temperature_c} °C</dd>
             </dl>
-            {load.state.health_index === null && (
+            {phase2 && load.state.health_index === null && (
               <p>
                 Anomaly detection isn&apos;t available yet — the ML pipeline (Phase 4) hasn&apos;t
                 run.
@@ -88,7 +125,7 @@ export function App(): JSX.Element {
             )}
           </section>
 
-          <HealthGauge healthIndex={load.state.health_index} />
+          {phase2 && <HealthGauge healthIndex={load.state.health_index} />}
 
           <TrendChart
             label="Vibration RMS"
@@ -102,18 +139,22 @@ export function App(): JSX.Element {
           />
 
           <AlertsPanel
-            state={load.state}
+            state={view(load.state)}
             thresholds={{
-              healthIndex: DEFAULT_HEALTH_INDEX_ALERT_THRESHOLD,
-              temperatureC: DEFAULT_TEMPERATURE_ALERT_THRESHOLD_C,
+              healthIndex: config.alertHealthIndex,
+              temperatureC: config.alertTemperatureC,
             }}
           />
 
-          <HistoryLog history={load.history} />
+          <HistoryLog history={load.history.map(view)} showPhase2={phase2} />
         </>
       )}
 
+      {phase2 && <CopilotPanel />}
+
       <RoiEstimator />
+
+      <SettingsPanel config={config} onSave={saveConfig} />
     </main>
   );
 }

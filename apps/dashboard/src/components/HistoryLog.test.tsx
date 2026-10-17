@@ -59,4 +59,11 @@ describe("HistoryLog", () => {
     expect(screen.getByText("t2")).toBeInTheDocument();
     expect(screen.queryByText("t1")).not.toBeInTheDocument();
   });
+
+  it("hides the ML columns and the alert filter in Phase 1", () => {
+    render(<HistoryLog history={[state({ health_index: 0.3 })]} showPhase2={false} />);
+    expect(screen.queryByLabelText(/filter by alert level/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: /health index/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("0.3")).not.toBeInTheDocument();
+  });
 });

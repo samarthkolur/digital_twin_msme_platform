@@ -1,11 +1,9 @@
 import type { DigitalTwinState } from "./api";
 
-// health_index threshold matches the ML calibration target in design.md §6.3
-// ("<0.6 = alert threshold"). The temperature threshold has no pilot-machine
-// calibration yet (no real DS18B20 deployment, design.md §24) — it's a
-// placeholder default the operator can override, not a calibrated value.
-export const DEFAULT_HEALTH_INDEX_ALERT_THRESHOLD = 0.6;
-export const DEFAULT_TEMPERATURE_ALERT_THRESHOLD_C = 70;
+// The thresholds themselves now come from the project config (config.ts,
+// design.md DD-047): health_index 0.6 matches the ML calibration target in
+// §6.3; the 70 °C temperature default has no pilot-machine calibration yet
+// (§24) and is an operator-adjustable placeholder.
 
 export interface AlertThresholds {
   healthIndex: number;

@@ -39,7 +39,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [edge, api, copilot, ml]
+        service: [edge, api, copilot, ml, config]
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
@@ -77,6 +77,8 @@ jobs:
             target: prod
           - image: services/copilot/Dockerfile
             target: prod
+          - image: services/config/Dockerfile
+            target: prod
           - image: services/ml/Dockerfile
             target: ""
           - image: docker/tools.Dockerfile
@@ -112,6 +114,7 @@ jobs:
           - services/edge/Dockerfile
           - services/api/Dockerfile
           - services/copilot/Dockerfile
+          - services/config/Dockerfile
           - services/ml/Dockerfile
           - docker/tools.Dockerfile
     steps:
