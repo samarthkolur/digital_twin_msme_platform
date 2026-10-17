@@ -7,6 +7,17 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: development
+    ignore:
+      # eslint-plugin-react and eslint-plugin-jsx-a11y do not support ESLint 10
+      # yet (design.md DD-045); remove once both list ^10 as a peer.
+      - dependency-name: "eslint"
+        versions: [">=10"]
+      - dependency-name: "@eslint/js"
+        versions: [">=10"]
+      # typescript-eslint supports TypeScript <6.1 only (DD-045); remove once
+      # its peer range covers 7.x.
+      - dependency-name: "typescript"
+        versions: [">=6.1"]
 
   - package-ecosystem: pip
     directory: /services/edge
@@ -32,31 +43,61 @@ updates:
     directory: /apps/dashboard
     schedule:
       interval: weekly
+    ignore:
+      # Node stays on the active LTS line (22); odd-numbered releases are never
+      # LTS. Move to the next LTS deliberately, not via Dependabot (DD-045).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /services/edge
     schedule:
       interval: weekly
+    ignore:
+      # Python is pinned to 3.11 to match Raspberry Pi OS (design.md §7) and
+      # every service's requires-python "<3.12" (DD-045).
+      - dependency-name: "python"
+        versions: [">=3.12"]
 
   - package-ecosystem: docker
     directory: /services/api
     schedule:
       interval: weekly
+    ignore:
+      # Python is pinned to 3.11 to match Raspberry Pi OS (design.md §7) and
+      # every service's requires-python "<3.12" (DD-045).
+      - dependency-name: "python"
+        versions: [">=3.12"]
 
   - package-ecosystem: docker
     directory: /services/copilot
     schedule:
       interval: weekly
+    ignore:
+      # Python is pinned to 3.11 to match Raspberry Pi OS (design.md §7) and
+      # every service's requires-python "<3.12" (DD-045).
+      - dependency-name: "python"
+        versions: [">=3.12"]
 
   - package-ecosystem: docker
     directory: /services/ml
     schedule:
       interval: weekly
+    ignore:
+      # Python is pinned to 3.11 to match Raspberry Pi OS (design.md §7) and
+      # every service's requires-python "<3.12" (DD-045).
+      - dependency-name: "python"
+        versions: [">=3.12"]
 
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+    ignore:
+      # Node stays on the active LTS line (22); odd-numbered releases are never
+      # LTS. Move to the next LTS deliberately, not via Dependabot (DD-045).
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
