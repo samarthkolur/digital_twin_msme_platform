@@ -166,7 +166,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.141.1" },
-    { name = "onnxruntime", specifier = ">=1.29.0" },
+    { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "rpi-gpio", marker = "extra == 'hardware'", specifier = ">=0.7.1" },
