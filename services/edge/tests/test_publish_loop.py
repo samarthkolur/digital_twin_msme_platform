@@ -1,6 +1,8 @@
 import asyncio
 import json
 
+import pytest
+
 from edge.main import read_and_publish_once
 from edge.providers.simulated import SimulatedSensorProvider
 from edge.storage import RawReadingStore, StateStore
@@ -63,3 +65,50 @@ def test_read_and_publish_once_swallows_read_failure() -> None:
     assert raw_store.count() == 0
     assert state_store.latest("motor_01") is None
     assert client.published == []
+
+
+def test_publish_loop_applies_runtime_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The loop passes no ML engine while enablePhase2 is off and takes its
+    alert thresholds from the config service (design.md DD-047)."""
+    import edge.main
+    from edge.alerting import AlertThresholds
+    from edge.runtime_config import RuntimeConfig
+
+    calls: list[tuple[object, object]] = []
+
+    async def fake_once(*args: object) -> None:
+        calls.append((args[4], args[6]))
+        if len(calls) == 2:
+            raise asyncio.CancelledError
+
+    class _Config:
+        def __init__(self) -> None:
+            self.values = [
+                RuntimeConfig(False, 0.01, 0.6, 70.0),
+                RuntimeConfig(False, 0.01, 0.6, 70.0),
+                RuntimeConfig(True, 0.01, 0.5, 60.0),
+            ]
+
+        def get(self) -> RuntimeConfig:
+            return self.values.pop(0)
+
+    class _Gate:
+        def engine(self, enable_phase2: bool) -> object:
+            return "engine" if enable_phase2 else None
+
+    monkeypatch.setattr(edge.main, "read_and_publish_once", fake_once)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(
+            edge.main.publish_loop(
+                None,  # type: ignore[arg-type]
+                None,  # type: ignore[arg-type]
+                None,  # type: ignore[arg-type]
+                None,  # type: ignore[arg-type]
+                _Config(),  # type: ignore[arg-type]
+                _Gate(),  # type: ignore[arg-type]
+            )
+        )
+    assert calls == [
+        (None, AlertThresholds(health_index=0.6, temperature_c=70.0)),
+        ("engine", AlertThresholds(health_index=0.5, temperature_c=60.0)),
+    ]

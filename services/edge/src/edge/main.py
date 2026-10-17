@@ -14,7 +14,9 @@ from paho.mqtt.enums import CallbackAPIVersion
 
 from edge.alerting import AlertThresholds, Buzzer, evaluate_alerts, get_buzzer, highest_level
 from edge.ml_inference import MLInferenceEngine
+from edge.phase2 import Phase2Inference
 from edge.providers import SensorProvider, get_provider
+from edge.runtime_config import ConfigClient, RuntimeConfig
 from edge.storage import RawReadingStore, StateStore
 
 logger = logging.getLogger("edge")
@@ -26,7 +28,10 @@ MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
 RAW_MQTT_TOPIC = f"digital-cousin/{ASSET_ID}/raw"
 STATE_MQTT_TOPIC = f"digital-cousin/{ASSET_ID}/state"
 DATABASE_PATH = os.environ.get("DATABASE_PATH", ":memory:")
-PUBLISH_INTERVAL_SECONDS = float(os.environ.get("PUBLISH_INTERVAL_SECONDS", "5"))
+# The config service holds the runtime settings (enablePhase2, publish
+# interval, alert thresholds; design.md DD-047). These environment variables
+# are only the fallback used until it first answers.
+CONFIG_URL = os.environ.get("CONFIG_URL", "http://localhost:8002")
 # services/ml's ml-trainer job writes here (docker-compose.yml); edge mounts
 # the same host path read-only. Absent until a training run has happened
 # (design.md §24) — MLInferenceEngine.load() handles that by returning None.
@@ -35,10 +40,6 @@ ML_ARTIFACTS_DIR = Path(os.environ.get("ML_ARTIFACTS_DIR", "/app/ml-artifacts"))
 # touches GPIO; set BUZZER=gpio on a Pi with a buzzer fitted (design.md §6.2).
 BUZZER = os.environ.get("BUZZER", "none")
 BUZZER_GPIO_PIN = int(os.environ.get("BUZZER_GPIO_PIN", "18"))
-ALERT_THRESHOLDS = AlertThresholds(
-    health_index=float(os.environ.get("ALERT_HEALTH_INDEX", "0.6")),
-    temperature_c=float(os.environ.get("ALERT_TEMPERATURE_C", "70")),
-)
 
 _provider: SensorProvider | None = None
 
@@ -50,6 +51,7 @@ async def read_and_publish_once(
     state_store: StateStore,
     ml_engine: MLInferenceEngine | None = None,
     buzzer: Buzzer | None = None,
+    alert_thresholds: AlertThresholds | None = None,
 ) -> None:
     """Reads the active sensor provider once, logs it to SQLite (both the
     Phase 2 raw log and the Phase 3 state history), runs ML inference if a
@@ -94,7 +96,7 @@ async def read_and_publish_once(
     client.publish(STATE_MQTT_TOPIC, json.dumps(state))
 
     if buzzer is not None and state is not None:
-        alerts = evaluate_alerts(state, ALERT_THRESHOLDS)
+        alerts = evaluate_alerts(state, alert_thresholds or AlertThresholds())
         level = highest_level(alerts)
         if level is not None:
             for alert in alerts:
@@ -112,10 +114,15 @@ async def publish_loop(
     client: mqtt.Client,
     raw_store: RawReadingStore,
     state_store: StateStore,
-    ml_engine: MLInferenceEngine | None = None,
+    config_client: ConfigClient,
+    inference: Phase2Inference,
     buzzer: Buzzer | None = None,
 ) -> None:
     """Calls `read_and_publish_once` on a fixed period, forever.
+
+    The period, the alert thresholds and whether ML inference runs at all
+    (enablePhase2) are re-read from the config service every cycle, so a
+    change takes effect without restarting the edge.
 
     The wait is scheduled against a running deadline rather than slept for a
     fixed interval after each cycle, because acquisition is not instantaneous:
@@ -127,14 +134,28 @@ async def publish_loop(
     of back-to-back publishes.
     """
     loop = asyncio.get_running_loop()
-    next_publish_at = loop.time() + PUBLISH_INTERVAL_SECONDS
+    config = await asyncio.to_thread(config_client.get)
+    next_publish_at = loop.time() + config.publish_interval_seconds
     while True:
         await asyncio.sleep(max(0.0, next_publish_at - loop.time()))
-        await read_and_publish_once(provider, client, raw_store, state_store, ml_engine, buzzer)
+        config = await asyncio.to_thread(config_client.get)
+        await read_and_publish_once(
+            provider,
+            client,
+            raw_store,
+            state_store,
+            inference.engine(config.enable_phase2),
+            buzzer,
+            AlertThresholds(
+                health_index=config.alert_health_index,
+                temperature_c=config.alert_temperature_c,
+            ),
+        )
 
-        next_publish_at += PUBLISH_INTERVAL_SECONDS
+        interval = config.publish_interval_seconds
+        next_publish_at += interval
         if next_publish_at < loop.time():
-            next_publish_at = loop.time() + PUBLISH_INTERVAL_SECONDS
+            next_publish_at = loop.time() + interval
 
 
 @asynccontextmanager
@@ -143,7 +164,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _provider = get_provider(SENSOR_PROVIDER)
     raw_store = RawReadingStore(DATABASE_PATH)
     state_store = StateStore(DATABASE_PATH)
-    ml_engine = MLInferenceEngine.load(ML_ARTIFACTS_DIR)
+    config_client = ConfigClient(CONFIG_URL, fallback=RuntimeConfig.from_env())
+    inference = Phase2Inference(ML_ARTIFACTS_DIR)
 
     try:
         buzzer = get_buzzer(BUZZER, BUZZER_GPIO_PIN)
@@ -161,13 +183,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client.loop_start()
 
     publish_task = asyncio.create_task(
-        publish_loop(_provider, client, raw_store, state_store, ml_engine, buzzer)
+        publish_loop(_provider, client, raw_store, state_store, config_client, inference, buzzer)
     )
 
     logger.info(
-        "edge service started with provider=%s, ml_inference=%s, buzzer=%s",
+        "edge service started with provider=%s, config=%s, buzzer=%s",
         SENSOR_PROVIDER,
-        "enabled" if ml_engine is not None else "disabled",
+        CONFIG_URL,
         BUZZER,
     )
     try:
