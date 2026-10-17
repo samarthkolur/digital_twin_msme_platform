@@ -23,7 +23,7 @@ local-llm = [
 dev = [
   "pytest>=9.1.1",
   "pytest-cov>=7.1.0",
-  "mypy>=1.13",
+  "mypy>=2.3.0",
 ]
 
 [build-system]
