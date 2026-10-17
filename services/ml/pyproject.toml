@@ -25,7 +25,7 @@ dependencies = [
 dev = [
   "pytest>=9.1.1",
   "pytest-cov>=6.0",
-  "mypy>=1.13",
+  "mypy>=2.3.1",
   # Dev-only: verifies rul.onnx round-trips through a real inference session
   # in tests, not used by the training pipeline itself (mirrors DD-002's
   # precedent for edge's dev-only `onnx` dep).
