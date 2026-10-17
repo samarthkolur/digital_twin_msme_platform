@@ -16,32 +16,6 @@ cd digital_twin_msme_platform
 docker compose watch
 ```
 
-### Windows
-
-`docker compose watch`/`up`/`down`/`build`/`logs`/`ps` are plain Docker CLI calls and already work
-identically in PowerShell, cmd, or a WSL2/Git Bash shell — no changes needed. The two things that
-don't work out of the box on a stock Windows install are `scripts/bootstrap.sh` (bash) and every
-`make ...` target (GNU Make isn't bundled with Windows). Pick one:
-
-- **WSL2 (recommended)** — install [Docker Desktop with the WSL2
-  backend](https://docs.docker.com/desktop/wsl/), clone the repo _inside_ the WSL2 filesystem (not
-  under `/mnt/c/...`), and follow the Quick start above unmodified inside the WSL2 shell. This gives
-  full parity with Linux/macOS, including `make`.
-- **Native PowerShell (no WSL)** — use the PowerShell equivalents committed alongside the bash/Make
-  originals:
-
-  ```powershell
-  git clone https://github.com/samarthkolur/digital_twin_msme_platform.git
-  cd digital_twin_msme_platform
-  .\scripts\bootstrap.ps1
-  docker compose watch
-  ```
-
-  For the quality-gate commands normally run via `make` (see below), use
-  `.\scripts\make.ps1 <target>` instead, e.g. `.\scripts\make.ps1 lint`. `scripts/bootstrap.ps1` and
-  `scripts/make.ps1` are line-for-line translations of `scripts/bootstrap.sh` and the `Makefile` —
-  keep all of them in sync if either changes (design.md DD-038).
-
 - Dashboard: http://localhost:5173
 - API: http://localhost:8000/health
 - Copilot: http://localhost:8001/health
@@ -70,9 +44,7 @@ scripts/            Bootstrap and validation tooling
 
 ## Common tasks
 
-All of these run inside Docker — see the [`Makefile`](./Makefile) for the full list. On native
-Windows without `make` (see [Windows](#windows) above), run the same targets via
-`.\scripts\make.ps1 <target>` instead.
+All of these run inside Docker — see the [`Makefile`](./Makefile) for the full list.
 
 ```sh
 make lint          # ESLint + ruff
