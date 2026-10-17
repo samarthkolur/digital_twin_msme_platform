@@ -1,5 +1,5 @@
 import { useState, type JSX, type SubmitEvent } from "react";
-import type { AppConfig } from "../config";
+import type { AppConfig, CopilotLlmMode } from "../config";
 
 interface SettingsPanelProps {
   config: AppConfig;
@@ -7,20 +7,48 @@ interface SettingsPanelProps {
   onSave: (changes: Partial<AppConfig>) => Promise<void>;
 }
 
-/**
- * Edits the project-wide config (design.md DD-047). enablePhase2 switches the
- * whole system between Phase 1 only and Phase 1 + Phase 2; the services pick
- * the change up within a few seconds, without a restart.
- */
+type NumericSetting = {
+  [K in keyof AppConfig]: AppConfig[K] extends number ? K : never;
+}[keyof AppConfig];
+
+/** Compares every setting, so one added later can't be silently skipped. */
 function sameConfig(a: AppConfig, b: AppConfig): boolean {
+  return (Object.keys(a) as (keyof AppConfig)[]).every((key) => a[key] === b[key]);
+}
+
+interface NumberFieldProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}
+
+function NumberField({ label, value, min, max, step, onChange }: NumberFieldProps): JSX.Element {
   return (
-    a.enablePhase2 === b.enablePhase2 &&
-    a.publishIntervalSeconds === b.publishIntervalSeconds &&
-    a.alertHealthIndex === b.alertHealthIndex &&
-    a.alertTemperatureC === b.alertTemperatureC
+    <label>
+      {label}
+      <input
+        type="number"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => {
+          onChange(Number(event.target.value));
+        }}
+      />
+    </label>
   );
 }
 
+/**
+ * Edits the project-wide config (design.md DD-047). enablePhase2 switches the
+ * whole system between Phase 1 only and Phase 1 + Phase 2; the services pick
+ * the change up within a few seconds, without a restart. Phase 2 settings
+ * are shown only while Phase 2 is enabled.
+ */
 export function SettingsPanel({ config, onSave }: SettingsPanelProps): JSX.Element {
   const [draft, setDraft] = useState<AppConfig>(config);
   const [base, setBase] = useState<AppConfig>(config);
@@ -57,8 +85,10 @@ export function SettingsPanel({ config, onSave }: SettingsPanelProps): JSX.Eleme
     }
   }
 
-  function setNumber(key: keyof Omit<AppConfig, "enablePhase2">, value: string): void {
-    setDraft((current) => ({ ...current, [key]: Number(value) }));
+  function setter(key: NumericSetting): (value: number) => void {
+    return (value) => {
+      setDraft((current) => ({ ...current, [key]: value }));
+    };
   }
 
   return (
@@ -75,46 +105,71 @@ export function SettingsPanel({ config, onSave }: SettingsPanelProps): JSX.Eleme
           />
           Enable Phase 2 (ML anomaly detection, health index, NL copilot)
         </label>
-        <label>
-          Publish interval (s)
-          <input
-            type="number"
-            min={0.5}
-            max={3600}
-            step={0.5}
-            value={draft.publishIntervalSeconds}
-            onChange={(event) => {
-              setNumber("publishIntervalSeconds", event.target.value);
-            }}
-          />
-        </label>
-        <label>
-          Temperature alert threshold (°C)
-          <input
-            type="number"
-            min={-40}
-            max={150}
-            step={1}
-            value={draft.alertTemperatureC}
-            onChange={(event) => {
-              setNumber("alertTemperatureC", event.target.value);
-            }}
-          />
-        </label>
+        <NumberField
+          label="Publish interval (s)"
+          value={draft.publishIntervalSeconds}
+          min={0.5}
+          max={3600}
+          step={0.5}
+          onChange={setter("publishIntervalSeconds")}
+        />
+        <NumberField
+          label="Temperature alert threshold (°C)"
+          value={draft.alertTemperatureC}
+          min={-40}
+          max={150}
+          step={1}
+          onChange={setter("alertTemperatureC")}
+        />
         {draft.enablePhase2 && (
-          <label>
-            Health index alert threshold
-            <input
-              type="number"
+          <fieldset>
+            <legend>Phase 2</legend>
+            <NumberField
+              label="Health index alert threshold"
+              value={draft.alertHealthIndex}
               min={0}
               max={1}
               step={0.05}
-              value={draft.alertHealthIndex}
-              onChange={(event) => {
-                setNumber("alertHealthIndex", event.target.value);
-              }}
+              onChange={setter("alertHealthIndex")}
             />
-          </label>
+            <NumberField
+              label="Critical below this fraction of the threshold"
+              value={draft.alertCriticalFraction}
+              min={0.05}
+              max={1}
+              step={0.05}
+              onChange={setter("alertCriticalFraction")}
+            />
+            <label>
+              Copilot language model
+              <select
+                value={draft.copilotLlmMode}
+                onChange={(event) => {
+                  const mode = event.target.value as CopilotLlmMode;
+                  setDraft((current) => ({ ...current, copilotLlmMode: mode }));
+                }}
+              >
+                <option value="local">Local (TinyLlama, no API key)</option>
+                <option value="api">API (Anthropic/OpenAI, needs a key)</option>
+              </select>
+            </label>
+            <NumberField
+              label="Copilot: ignore readings older than (s)"
+              value={draft.copilotStaleAfterSeconds}
+              min={10}
+              max={86400}
+              step={10}
+              onChange={setter("copilotStaleAfterSeconds")}
+            />
+            <NumberField
+              label="Copilot: readings used as context"
+              value={draft.copilotContextSize}
+              min={1}
+              max={1000}
+              step={1}
+              onChange={setter("copilotContextSize")}
+            />
+          </fieldset>
         )}
         <button type="submit" disabled={status.kind === "saving"}>
           Save settings

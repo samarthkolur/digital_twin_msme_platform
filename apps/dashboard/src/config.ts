@@ -3,11 +3,17 @@ import type { DigitalTwinState } from "./api";
 // Mirrors `services/config/src/appconfig/schema.py`'s AppConfig (design.md
 // DD-047). No shared package between the TypeScript and Python sides, so this
 // shape must be kept in sync by hand.
+export type CopilotLlmMode = "local" | "api";
+
 export interface AppConfig {
   enablePhase2: boolean;
   publishIntervalSeconds: number;
   alertHealthIndex: number;
   alertTemperatureC: number;
+  alertCriticalFraction: number;
+  copilotLlmMode: CopilotLlmMode;
+  copilotStaleAfterSeconds: number;
+  copilotContextSize: number;
 }
 
 /**
@@ -19,6 +25,10 @@ export const DEFAULT_CONFIG: AppConfig = {
   publishIntervalSeconds: 5,
   alertHealthIndex: 0.6,
   alertTemperatureC: 70,
+  alertCriticalFraction: 0.75,
+  copilotLlmMode: "local",
+  copilotStaleAfterSeconds: 300,
+  copilotContextSize: 10,
 };
 
 const CONFIG_URL = import.meta.env.VITE_CONFIG_URL;

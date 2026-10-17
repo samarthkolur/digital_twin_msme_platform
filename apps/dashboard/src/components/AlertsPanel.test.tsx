@@ -23,7 +23,7 @@ function state(overrides: Partial<DigitalTwinState> = {}): DigitalTwinState {
   };
 }
 
-const thresholds = { healthIndex: 0.6, temperatureC: 70 };
+const thresholds = { healthIndex: 0.6, temperatureC: 70, criticalFraction: 0.75 };
 
 describe("AlertsPanel", () => {
   it("shows a no-active-alerts message for a normal state", () => {

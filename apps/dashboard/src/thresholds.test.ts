@@ -22,7 +22,7 @@ function state(overrides: Partial<DigitalTwinState> = {}): DigitalTwinState {
   };
 }
 
-const thresholds = { healthIndex: 0.6, temperatureC: 70 };
+const thresholds = { healthIndex: 0.6, temperatureC: 70, criticalFraction: 0.75 };
 
 describe("evaluateAlerts", () => {
   it("returns no alerts for a normal reading", () => {
@@ -38,6 +38,17 @@ describe("evaluateAlerts", () => {
   it("flags critical when health index is below 75% of the threshold", () => {
     const alerts = evaluateAlerts(state({ health_index: 0.3 }), thresholds);
     expect(alerts[0]).toMatchObject({ level: "critical" });
+  });
+
+  it("uses the configured critical fraction", () => {
+    const lenient = { ...thresholds, criticalFraction: 0.5 };
+    // 0.40 is under the default 0.45 cut-off but above 0.6 x 0.5 = 0.30.
+    expect(evaluateAlerts(state({ health_index: 0.4 }), thresholds)[0]).toMatchObject({
+      level: "critical",
+    });
+    expect(evaluateAlerts(state({ health_index: 0.4 }), lenient)[0]).toMatchObject({
+      level: "warning",
+    });
   });
 
   it("does not flag anything when health index is null (not yet available)", () => {

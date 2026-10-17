@@ -55,4 +55,39 @@ describe("SettingsPanel", () => {
     expect(screen.getByLabelText(/temperature alert threshold/i)).toHaveValue(90);
     expect(screen.getByLabelText(/publish interval/i)).toHaveValue(5);
   });
+
+  it("edits the Phase 2 copilot settings", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<SettingsPanel config={{ ...DEFAULT_CONFIG, enablePhase2: true }} onSave={onSave} />);
+
+    fireEvent.change(screen.getByLabelText(/copilot language model/i), {
+      target: { value: "api" },
+    });
+    fireEvent.change(screen.getByLabelText(/readings used as context/i), {
+      target: { value: "25" },
+    });
+    fireEvent.change(screen.getByLabelText(/ignore readings older than/i), {
+      target: { value: "120" },
+    });
+    fireEvent.change(screen.getByLabelText(/critical below this fraction/i), {
+      target: { value: "0.5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /save settings/i }));
+
+    expect(await screen.findByText(/settings saved/i)).toBeInTheDocument();
+    expect(onSave).toHaveBeenCalledWith({
+      ...DEFAULT_CONFIG,
+      enablePhase2: true,
+      copilotLlmMode: "api",
+      copilotContextSize: 25,
+      copilotStaleAfterSeconds: 120,
+      alertCriticalFraction: 0.5,
+    });
+  });
+
+  it("hides the Phase 2 settings while Phase 2 is off", () => {
+    render(<SettingsPanel config={DEFAULT_CONFIG} onSave={vi.fn()} />);
+    expect(screen.queryByLabelText(/copilot language model/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/critical below this fraction/i)).not.toBeInTheDocument();
+  });
 });
