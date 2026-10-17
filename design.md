@@ -2113,6 +2113,32 @@ Entry 18's recommendation.
 
 ---
 
+### Entry 21 — First grouped Dependabot round (logical project time: 2026-10-17, same day)
+
+**Task completed:** Merging PR #96 changed `dependabot.yml`, so Dependabot rescanned. With DD-046's
+grouping it opened 4 PRs (#97–#100) instead of a per-package flood. All were applied, one commit per
+PR:
+- copilot: httpx ≥0.28.1
+- edge: fastapi ≥0.143, spidev ≥3.8, pytest-cov ≥7.1, httpx ≥0.28.1
+- ml: torch ≥2.14.1, numpy ≥2.4.6, pandas ≥3.0.6, onnxscript ≥0.7.2, pytest-cov ≥7.1, mypy ≥2.4
+- Actions: pnpm/action-setup v6, docker/setup-buildx-action v4, docker/build-push-action v7
+
+`services/api` got the same httpx floor pre-emptively. Each pip group passed its service's ruff,
+mypy and pytest before committing.
+
+**Files modified:** `services/{api,copilot,edge,ml}/{pyproject.toml,uv.lock}`,
+`.github/workflows/ci.yml`, `design.md` (§28, §29).
+
+**Files created / deleted:** None.
+
+**Reason for change:** Finish resolving every open Dependabot PR.
+
+**Architectural decisions:** None new (applies DD-046).
+
+**Recommended next task:** Unchanged from Entry 20.
+
+---
+
 ## 29. Current Repository State
 
 - **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
@@ -2172,6 +2198,8 @@ Entry 18's recommendation.
   branches; dashboard on React 19 / Vite 8 / Vitest 5 / TypeScript 6.0, ESLint held at 9.
 - **Entry 20 (2026-10-17)**: follow-up Dependabot wave (#80–#95) applied and closed; Dependabot now
   groups pip (per service) and Actions updates (DD-046).
+- **Entry 21 (2026-10-17)**: first grouped Dependabot round (#97–#100) applied; no Dependabot PRs
+  or branches open afterwards.
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
