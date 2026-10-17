@@ -167,6 +167,7 @@ dependencies = [
     { name = "onnxscript" },
     { name = "pandas" },
     { name = "scikit-learn" },
+    { name = "scipy" },
     { name = "skl2onnx" },
     { name = "torch" },
 ]
@@ -185,6 +186,7 @@ requires-dist = [
     { name = "onnxscript", specifier = ">=0.2" },
     { name = "pandas", specifier = ">=2.2" },
     { name = "scikit-learn", specifier = ">=1.5" },
+    { name = "scipy", specifier = ">=1.13" },
     { name = "skl2onnx", specifier = ">=1.17" },
     { name = "torch", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cpu" },
 ]

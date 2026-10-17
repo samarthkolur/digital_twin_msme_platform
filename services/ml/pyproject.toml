@@ -8,6 +8,8 @@ dependencies = [
   "torch>=2.5",
   "numpy>=2.0",
   "pandas>=2.2",
+  # Reads real CWRU .mat files (ml.cwru_loader) — design.md DD-042.
+  "scipy>=1.13",
   # ONNX export (design.md DD-031, supersedes the originally documented
   # TFLite target): torch.onnx.export is built into torch already; skl2onnx
   # converts the Isolation Forest so both models share one runtime
@@ -38,7 +40,15 @@ strict = true
 files = "src"
 
 [[tool.mypy.overrides]]
-module = ["sklearn.*", "torch.*", "pandas.*", "skl2onnx.*", "onnx.*", "onnxscript.*"]
+module = [
+  "sklearn.*",
+  "torch.*",
+  "pandas.*",
+  "skl2onnx.*",
+  "onnx.*",
+  "onnxscript.*",
+  "scipy.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
