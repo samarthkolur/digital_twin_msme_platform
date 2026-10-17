@@ -143,6 +143,8 @@ autoencoder.onnx(+.onnx.data), health_index_calibration.json, manifest.json}`. N
 - [ ] Give `api`'s `GET /state/history` pagination or a time-range parameter so the dashboard's
       historical log can actually reach the originally-scoped 24h window instead of the current
       1000-row cap (~83 minutes at the default publish interval) — design.md §26.
+- [ ] Add authentication to the config service's `PATCH /config` before the stack is ever exposed
+      beyond localhost/LAN — anyone who can reach it can flip `enablePhase2` (design.md DD-047, §26).
 - [ ] Lift the `.github/dependabot.yml` ignore rules for ESLint 10 and TypeScript ≥6.1 once
       `eslint-plugin-react`/`eslint-plugin-jsx-a11y` support ESLint 10 and typescript-eslint
       supports TypeScript 7 (design.md DD-045, §26).
