@@ -123,7 +123,7 @@ requires-dist = [
 dev = [
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
 ]
 
 [[package]]
