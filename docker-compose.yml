@@ -58,6 +58,10 @@ services:
       DATABASE_PATH: /data/digital_cousin.sqlite3
       PUBLISH_INTERVAL_SECONDS: "5"
       ML_ARTIFACTS_DIR: /app/ml-artifacts
+      # Audible alerting (design.md DD-040): "none" never touches GPIO, so dev
+      # machines and CI stay silent; set BUZZER=gpio on a Pi with a buzzer fitted.
+      BUZZER: ${BUZZER:-none}
+      BUZZER_GPIO_PIN: ${BUZZER_GPIO_PIN:-18}
     volumes:
       - sqlite-data:/data
       # Same host path the ml-trainer profile writes into (below) — read-only
