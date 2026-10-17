@@ -12,7 +12,7 @@ dependencies = [
   # Forest + autoencoder models. Ships prebuilt wheels (no native compiler
   # needed at install time, unlike the optional `hardware`/`local-llm`
   # extras elsewhere in this repo), so it's a plain dependency, not extra.
-  "onnxruntime>=1.20",
+  "onnxruntime>=1.29.0",
 ]
 
 [project.optional-dependencies]
