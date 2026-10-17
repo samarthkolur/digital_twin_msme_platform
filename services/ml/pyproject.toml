@@ -15,7 +15,7 @@ dependencies = [
   # converts the Isolation Forest so both models share one runtime
   # (onnxruntime) at inference time in services/edge.
   "onnx>=1.23.2",
-  "skl2onnx>=1.17",
+  "skl2onnx>=1.20.0",
   # torch>=2.9's default ONNX exporter is dynamo-based and requires this;
   # without it torch.onnx.export raises ModuleNotFoundError at call time.
   "onnxscript>=0.7.1",
