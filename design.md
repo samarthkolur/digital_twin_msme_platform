@@ -2079,11 +2079,20 @@ pydantic ≥2.14.1, uvicorn ≥0.54, mypy ≥2.4; ml: onnxruntime ≥1.31, sciki
 ≥1.23.2, skl2onnx ≥1.20, scipy ≥1.17.1; copilot: llama-cpp-python ≥0.3.36, fastapi ≥0.143,
 mypy ≥2.4, uvicorn ≥0.54, pydantic ≥2.14.1), plus hadolint-action 3.5.0. `services/api` was aligned to the
 same floors pre-emptively (fastapi ≥0.143, uvicorn ≥0.54, pydantic ≥2.14.1, pytest ≥9.1.1,
-pytest-cov ≥7.1, mypy ≥2.4), so it doesn't start its own wave before grouping takes effect. Dependabot is now grouped (DD-046), and the edge test stubs
+pytest-cov ≥7.1, mypy ≥2.4), so it doesn't start its own wave before grouping takes effect.
+hadolint-action 3.5.0 ships hadolint 2.15.1, which now applies `DL3025` to `HEALTHCHECK` too. Every
+service image's shell-form check failed CI, so the checks became `CMD ["sh", "-c", "… || exit 1"]`,
+keeping the exit-code normalisation. Verifying that at runtime surfaced a pre-existing bug: the
+dashboard image's own healthcheck probed `localhost` (resolves to `::1` only, while nginx listens
+on IPv4) and always reported unhealthy outside the prod compose overlay, which already overrides it
+(commit `b01d02f`). The image now probes `127.0.0.1`. Both the api and dashboard images were
+confirmed `healthy` locally. hadolint's `DL3066` (non-numeric `USER`) is info-level, below the CI
+threshold, and was left as is. Dependabot is now grouped (DD-046), and the edge test stubs
 pin their ONNX IR version (DD-046).
 
 **Files modified:** `services/{edge,api,ml,copilot}/{pyproject.toml,uv.lock}`,
-`services/edge/tests/test_ml_inference.py`, `.github/workflows/ci.yml`, `.github/dependabot.yml`,
+`services/edge/tests/test_ml_inference.py`, `services/{edge,api,copilot}/Dockerfile`,
+`apps/dashboard/Dockerfile`, `.github/workflows/ci.yml`, `.github/dependabot.yml`,
 `design.md` (§15 DD-046, §25, §28, §29).
 
 **Files created / deleted:** None.
