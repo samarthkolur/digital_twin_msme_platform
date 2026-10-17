@@ -11,7 +11,7 @@ overrides:
   # older vite (5.4.21) independently of the workspace's direct vite
   # dependency; force everything onto the patched line (GHSA-fx2h-pf6j-xcff,
   # fixed in 6.4.3) so `pnpm audit` doesn't flag the transitive copy.
-  vite: "^6.4.3"
+  vite: "^8.3.0"
   # Newly-disclosed advisories (as of this override, none tied to any code
   # change here) in deep transitive deps of dev-only tooling — commitlint's
   # ajv->fast-uri, eslint's own js-yaml/minimatch->brace-expansion chain, and
