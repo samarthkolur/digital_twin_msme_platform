@@ -10,6 +10,7 @@ from appconfig.cli import main
 def _database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "config.sqlite3"))
     monkeypatch.delenv("ENABLE_PHASE2", raising=False)
+    monkeypatch.delenv("COPILOT_LLM_MODE", raising=False)
 
 
 def test_profiles_empty_when_phase2_disabled(capsys: pytest.CaptureFixture[str]) -> None:
