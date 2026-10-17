@@ -30,7 +30,8 @@ DEFAULT_HEALTH_INDEX_THRESHOLD = 0.6
 DEFAULT_TEMPERATURE_THRESHOLD_C = 70.0
 
 # A health index below this fraction of the threshold is critical rather than
-# a warning, matching the dashboard's `thresholds.healthIndex * 0.75`.
+# a warning. Default only: the live value is the config's alertCriticalFraction
+# (design.md DD-047), shared with the dashboard's evaluateAlerts.
 CRITICAL_HEALTH_FRACTION = 0.75
 
 AlertLevel = Literal["warning", "critical"]
@@ -40,6 +41,7 @@ AlertLevel = Literal["warning", "critical"]
 class AlertThresholds:
     health_index: float = DEFAULT_HEALTH_INDEX_THRESHOLD
     temperature_c: float = DEFAULT_TEMPERATURE_THRESHOLD_C
+    critical_fraction: float = CRITICAL_HEALTH_FRACTION
 
 
 @dataclass(frozen=True)
@@ -60,7 +62,7 @@ def evaluate_alerts(state: dict[str, Any], thresholds: AlertThresholds) -> list[
 
     health_index = state.get("health_index")
     if health_index is not None and health_index < thresholds.health_index:
-        critical = health_index < thresholds.health_index * CRITICAL_HEALTH_FRACTION
+        critical = health_index < thresholds.health_index * thresholds.critical_fraction
         alerts.append(
             Alert(
                 level="critical" if critical else "warning",

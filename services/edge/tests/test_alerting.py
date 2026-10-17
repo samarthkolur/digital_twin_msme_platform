@@ -55,6 +55,18 @@ def test_health_index_far_below_threshold_is_critical() -> None:
     assert [a.level for a in alerts] == ["critical"]
 
 
+def test_critical_fraction_comes_from_the_thresholds() -> None:
+    """0.40 is critical at the default 0.75 fraction (0.45 cut-off) but only a
+    warning once the configured fraction lowers the cut-off to 0.30."""
+    default = evaluate_alerts(state(health_index=0.40), THRESHOLDS)
+    configured = evaluate_alerts(
+        state(health_index=0.40),
+        AlertThresholds(health_index=0.6, temperature_c=70.0, critical_fraction=0.5),
+    )
+    assert [a.level for a in default] == ["critical"]
+    assert [a.level for a in configured] == ["warning"]
+
+
 def test_model_alert_level_is_surfaced_alongside_thresholds() -> None:
     alerts = evaluate_alerts(state(temperature_c=75.0, alert_level="critical"), THRESHOLDS)
     assert {a.level for a in alerts} == {"warning", "critical"}

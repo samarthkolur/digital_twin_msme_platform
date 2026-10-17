@@ -154,6 +154,7 @@ async def publish_loop(
             AlertThresholds(
                 health_index=config.alert_health_index,
                 temperature_c=config.alert_temperature_c,
+                critical_fraction=config.alert_critical_fraction,
             ),
         )
 
