@@ -171,7 +171,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "rpi-gpio", marker = "extra == 'hardware'", specifier = ">=0.7.1" },
     { name = "spidev", marker = "extra == 'hardware'", specifier = ">=3.6" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.3" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "w1thermsensor", marker = "extra == 'hardware'", specifier = ">=2.3" },
 ]
 
