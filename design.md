@@ -554,6 +554,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-043 | The research paper is kept in-repo under `docs/research/` as LaTeX source (`digital_cousin_paper.tex`) plus its compiled PDF, a `.docx` export, and generated figures; figures are reproducible via `services/ml/scripts/make_paper_figures.py` (run with `uv run --with matplotlib --with seaborn --with onnxruntime`) rather than hand-made | Keeps the paper's numbers traceable to the same loaders/artifacts the code uses. Plotting libraries are pulled in ad hoc instead of becoming `ml` dependencies, since nothing in training or inference needs them; mypy ignores their missing stubs. LaTeX intermediates (`*.aux`, `*.log`) and local draft backups (`*.bak`) are gitignored, as is a root-owned duplicate `docs/research/.figures-rootowned/` left by a pre-DD-039 container run (cannot be removed without root). The committed PDF was compiled before the last `.tex` edits — rebuild it before submission |
 | DD-044 | Cleared a second wave of dependency-audit failures (found before pushing Entry 18) by **upgrading the parent tool** wherever no patched release exists on the line the parent accepts, and by overrides otherwise: `knip` 5 → 6 and `lint-staged` 15 → 16 (both drop `micromatch`→`braces`, whose advisory has no patched release at all), `vitest`/`@vitest/coverage-v8` 3.2 → 4.1 (drops `tinypool` 1.x, two critical advisories patched only in 2.x); raised `pnpm-workspace.yaml` overrides for `fast-uri`, `js-yaml`, all three `brace-expansion` lines (`minimatch@3`/`@9`/`@10`), `browserslist`, `baseline-browser-mapping`, `source-map-js`, `smol-toml`; `anyio` 4.14.1 → 4.14.2 in the `edge`/`api`/`copilot` locks | Same category as DD-037 — advisories disclosed after PR #61, unrelated to any code change. Forcing `tinypool` 2 under vitest 3 or a nonexistent `braces` 3.0.4 by override would either break the parent or not resolve at all, so the parent upgrade is the only real fix. knip 6 flagged `VibrationFeatures` in `apps/dashboard/src/api.ts` as an unused export; the `export` was dropped (only used in that file). lint-staged 16 requires Node ≥22.22.1 — the toolbox's `node:22-slim` and CI's `NODE_VERSION: "22"` both resolve newer. Verified locally: frozen install, `pnpm audit --audit-level=high` clean, lint/typecheck/test/knip pass, `pip-audit` clean for all four services |
 | DD-045 | Resolved the 30 open Dependabot PRs by re-applying every viable update as its own commit on one branch (`chore/dependabot-updates`) rather than merging the bot PRs individually, then closing all 30 as superseded and deleting their branches. **Taken:** all 15 pip floor bumps (edge: fastapi ≥0.141.1, uvicorn ≥0.52.3, onnxruntime ≥1.29, mypy ≥2.3.1, pytest ≥9.1.1; ml: scikit-learn ≥1.9, pandas ≥3.0.5, onnxscript ≥0.7.1, mypy ≥2.3.1, pytest ≥9.1.1; copilot: fastapi ≥0.139.2, llama-cpp-python ≥0.3.34, mypy ≥2.3, pytest ≥9.1.1, pytest-cov ≥7.1), each re-locked; actions/checkout, setup-node and setup-uv v7, hadolint-action 3.3.0, gitleaks-action v3; nginx 1.29-alpine; React/react-dom 19.3; prettier 3.9, typescript-eslint 8.70, Testing Library react 16.3 / jest-dom 7, commitlint 21, lint-staged 17, eslint-config-prettier 10, react-hooks plugin 7, globals 17, Vite 8 + plugin-react 6 + Vitest 5 + jsdom 30 (the workspace `vite` override moved to `^8.3.0` with them). **Declined, with `ignore` rules in `.github/dependabot.yml`:** Python 3.12 base images (every service pins `requires-python <3.12` to match Raspberry Pi OS, §7); Node 25 (non-LTS; stay on 22 LTS); ESLint/`@eslint/js` 10 (latest `eslint-plugin-react` 7.37.5 and `eslint-plugin-jsx-a11y` 6.10.2 crash or declare no support — confirmed by running lint); TypeScript 7 (typescript-eslint 8.71 peer range is `<6.1`), taken as **TypeScript 6.0** instead, the newest supported line | Merging 30 bot PRs one by one would have meant 30 rebases and CI runs, and most were red only because of the pre-DD-044 audit failures on `main`. Each update was gated on its own before committing: pip bumps via ruff/mypy/pytest for that service, npm bumps via the full toolbox TypeScript gate (frozen install, prettier, lint, typecheck, test, knip, `pnpm audit`); dashboard dev/prod images built locally after Vite 8. The ignore rules carry their removal condition inline so they are revisited rather than forgotten (§26) |
+| DD-046 | Dependabot pip and GitHub Actions updates are **grouped** (`groups:` with `patterns: ["*"]`): one PR per Python service directory and one for all workflow actions. Edge test stub ONNX models are built with an explicit `ir_version=10` (`STUB_IR_VERSION` in `services/edge/tests/test_ml_inference.py`) instead of the `onnx` library default | Merging DD-045's config change made Dependabot rescan at once and open 14 more single-package PRs. 13 of them only raised `pyproject.toml` floors to versions `uv.lock` already resolved, so per-package PRs were noise. One of those bumps (`onnx` ≥1.23.2 in edge) exposed a real incompatibility: onnx 1.23 stamps models with IR 14 by default, and onnxruntime 1.31 (the edge runtime) loads at most IR 13. This only affected the hand-built test stubs. The real `ml` exporters set their own IR version: a synthetic-pipeline run with onnx 1.23.2 produced `autoencoder.onnx` at IR 10 and `isolation_forest.onnx` at IR 8, and both load in onnxruntime 1.31 |
 
 ---
 
@@ -840,6 +841,12 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
 
 - ~~`scripts/bootstrap.ps1`/`scripts/make.ps1` (DD-038) unverified on real Windows~~ — **resolved
   by removal** (Entry 18); the scripts no longer exist.
+- **Host environment:** this checkout lives on an NTFS partition (`/media/samarth/DataFiles5`,
+  `ntfs3` driver, kernel 7.0.0-31). Entry 20 recorded two kernel BUGs in that driver's write path
+  triggered by `git` writes, leaving unkillable processes and stale `.git/index.lock` files until a
+  reboot. This is a host/kernel issue, not a project one. Keep the working copy on a native Linux
+  filesystem (e.g. ext4 under `$HOME`) to avoid it. If it recurs here, reboot and run `git fsck`
+  before continuing.
 - `docs/research/digital_cousin_paper.pdf` was compiled before the final `.tex` edits (DD-043) —
   rebuild before treating it as the submission copy.
 - `docs/research/.figures-rootowned/` (gitignored) is a root-owned leftover from a pre-DD-039
@@ -2064,6 +2071,37 @@ the stash's design decisions now renumber from DD-046 (DD-045 is taken by this e
 
 ---
 
+### Entry 20 — Dependabot follow-up wave (logical project time: 2026-10-17, same day)
+
+**Task completed:** Resolved the 14 Dependabot PRs (#80–#93) that opened right after PR #79 merged.
+All 13 pip floor bumps were applied, one commit each (edge: onnxruntime ≥1.31, onnx ≥1.23.2,
+pydantic ≥2.14.1, uvicorn ≥0.54, mypy ≥2.4; ml: onnxruntime ≥1.31, scikit-learn ≥1.9.1, onnx
+≥1.23.2, skl2onnx ≥1.20, scipy ≥1.17.1; copilot: llama-cpp-python ≥0.3.36, fastapi ≥0.143,
+mypy ≥2.4), plus hadolint-action 3.5.0. Dependabot is now grouped (DD-046), and the edge test stubs
+pin their ONNX IR version (DD-046).
+
+**Files modified:** `services/{edge,ml,copilot}/{pyproject.toml,uv.lock}`,
+`services/edge/tests/test_ml_inference.py`, `.github/workflows/ci.yml`, `.github/dependabot.yml`,
+`design.md` (§15 DD-046, §25, §28, §29).
+
+**Files created / deleted:** None.
+
+**Reason for change:** Finish the user's request to resolve all Dependabot branches.
+
+**Architectural decisions:** DD-046.
+
+**Known issues:** Mid-session, the host kernel hit `kernel BUG at fs/iomap/buffered-io.c:1061` in
+the `ntfs3` driver (`ntfs_file_write_iter`) twice while `git` was writing to this checkout. It left
+a `git commit` stuck in uninterruptible sleep and stale `.git/index.lock` files, and earlier it hung
+a `ruff format` in the pre-commit hook. A reboot cleared it, and `git fsck` was clean afterwards.
+See §25. Entry 19's note that `ml` tests slowed to ~100 s did not reproduce after the reboot (~19 s),
+so it was likely the same host instability rather than onnxscript.
+
+**Recommended next task:** Move the working copy off the NTFS partition (§25). Then continue with
+Entry 18's recommendation.
+
+---
+
 ## 29. Current Repository State
 
 - **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
@@ -2121,6 +2159,8 @@ the stash's design decisions now renumber from DD-046 (DD-045 is taken by this e
   dependency-audit fixes incl. knip 6 / vitest 4.1 / lint-staged 16 (DD-044).
 - **Entry 19 (2026-10-17)**: Dependabot backlog cleared (DD-045) — no open Dependabot PRs or
   branches; dashboard on React 19 / Vite 8 / Vitest 5 / TypeScript 6.0, ESLint held at 9.
+- **Entry 20 (2026-10-17)**: follow-up Dependabot wave (#80–#93) applied and closed; Dependabot now
+  groups pip (per service) and Actions updates (DD-046).
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
