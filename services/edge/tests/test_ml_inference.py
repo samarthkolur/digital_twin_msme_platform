@@ -9,6 +9,13 @@ from edge.providers.base import VibrationFeatures
 
 FEATURE_ORDER = ["rms_g", "kurtosis", "crest_factor", "peak_to_peak_g"]
 
+# Stub models are stamped with an explicit IR version rather than the `onnx`
+# package's default, which tracks the newest IR the library knows (14 as of
+# onnx 1.23) and can run ahead of what the onnxruntime edge deploys can load
+# (13 as of 1.31). Real artifacts come from services/ml's exporters, which set
+# their own IR version; this only keeps the test stubs loadable.
+STUB_IR_VERSION = 10
+
 
 def _build_sum_scores_model(path: Path) -> None:
     """A stub "isolation forest" ONNX model: output "scores" = sum of the 4
@@ -20,7 +27,9 @@ def _build_sum_scores_model(path: Path) -> None:
     output_tensor = helper.make_tensor_value_info("scores", TensorProto.FLOAT, [None, 1])
     node = helper.make_node("ReduceSum", inputs=["input"], outputs=["scores"], axes=[1], keepdims=1)
     graph = helper.make_graph([node], "isolation_forest_stub", [input_tensor], [output_tensor])
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 11)])
+    model = helper.make_model(
+        graph, opset_imports=[helper.make_opsetid("", 11)], ir_version=STUB_IR_VERSION
+    )
     onnx.save(model, str(path))
 
 
@@ -35,7 +44,9 @@ def _build_identity_autoencoder_model(path: Path) -> None:
     )
     node = helper.make_node("Identity", inputs=["input"], outputs=["reconstruction"])
     graph = helper.make_graph([node], "autoencoder_stub", [input_tensor], [output_tensor])
-    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 11)])
+    model = helper.make_model(
+        graph, opset_imports=[helper.make_opsetid("", 11)], ir_version=STUB_IR_VERSION
+    )
     onnx.save(model, str(path))
 
 
