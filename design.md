@@ -553,6 +553,7 @@ FastAPI services; ml is an on-demand training job).
 | DD-042 | Real-dataset loaders and an RUL regressor land as standalone `ml` modules (`cwru_metadata`, `cwru_loader`, `ims_loader`, `rul`) with their own unit tests, ahead of — and separately from — wiring them into `ml.pipeline` | These are carved out of a larger in-progress backlog (local `wip/full-backlog` stash) so they can be reviewed and CI-gated on their own. `scipy` becomes a direct runtime dependency (CWRU ships MATLAB `.mat` files); `onnxruntime` is a dev-only dependency so `test_rul` can round-trip the exported `rul.onnx` through a real inference session. `ml.pipeline`'s real-CWRU branch is still the DD-031 `NotImplementedError` until the wiring change lands (§24). The backlog stash numbers its own decisions DD-038–DD-044 against a different design.md; those numbers are **not** these — renumber when that work is merged |
 | DD-043 | The research paper is kept in-repo under `docs/research/` as LaTeX source (`digital_cousin_paper.tex`) plus its compiled PDF, a `.docx` export, and generated figures; figures are reproducible via `services/ml/scripts/make_paper_figures.py` (run with `uv run --with matplotlib --with seaborn --with onnxruntime`) rather than hand-made | Keeps the paper's numbers traceable to the same loaders/artifacts the code uses. Plotting libraries are pulled in ad hoc instead of becoming `ml` dependencies, since nothing in training or inference needs them; mypy ignores their missing stubs. LaTeX intermediates (`*.aux`, `*.log`) and local draft backups (`*.bak`) are gitignored, as is a root-owned duplicate `docs/research/.figures-rootowned/` left by a pre-DD-039 container run (cannot be removed without root). The committed PDF was compiled before the last `.tex` edits — rebuild it before submission |
 | DD-044 | Cleared a second wave of dependency-audit failures (found before pushing Entry 18) by **upgrading the parent tool** wherever no patched release exists on the line the parent accepts, and by overrides otherwise: `knip` 5 → 6 and `lint-staged` 15 → 16 (both drop `micromatch`→`braces`, whose advisory has no patched release at all), `vitest`/`@vitest/coverage-v8` 3.2 → 4.1 (drops `tinypool` 1.x, two critical advisories patched only in 2.x); raised `pnpm-workspace.yaml` overrides for `fast-uri`, `js-yaml`, all three `brace-expansion` lines (`minimatch@3`/`@9`/`@10`), `browserslist`, `baseline-browser-mapping`, `source-map-js`, `smol-toml`; `anyio` 4.14.1 → 4.14.2 in the `edge`/`api`/`copilot` locks | Same category as DD-037 — advisories disclosed after PR #61, unrelated to any code change. Forcing `tinypool` 2 under vitest 3 or a nonexistent `braces` 3.0.4 by override would either break the parent or not resolve at all, so the parent upgrade is the only real fix. knip 6 flagged `VibrationFeatures` in `apps/dashboard/src/api.ts` as an unused export; the `export` was dropped (only used in that file). lint-staged 16 requires Node ≥22.22.1 — the toolbox's `node:22-slim` and CI's `NODE_VERSION: "22"` both resolve newer. Verified locally: frozen install, `pnpm audit --audit-level=high` clean, lint/typecheck/test/knip pass, `pip-audit` clean for all four services |
+| DD-045 | Resolved the 30 open Dependabot PRs by re-applying every viable update as its own commit on one branch (`chore/dependabot-updates`) rather than merging the bot PRs individually, then closing all 30 as superseded and deleting their branches. **Taken:** all 15 pip floor bumps (edge: fastapi ≥0.141.1, uvicorn ≥0.52.3, onnxruntime ≥1.29, mypy ≥2.3.1, pytest ≥9.1.1; ml: scikit-learn ≥1.9, pandas ≥3.0.5, onnxscript ≥0.7.1, mypy ≥2.3.1, pytest ≥9.1.1; copilot: fastapi ≥0.139.2, llama-cpp-python ≥0.3.34, mypy ≥2.3, pytest ≥9.1.1, pytest-cov ≥7.1), each re-locked; actions/checkout, setup-node and setup-uv v7, hadolint-action 3.3.0, gitleaks-action v3; nginx 1.29-alpine; React/react-dom 19.3; prettier 3.9, typescript-eslint 8.70, Testing Library react 16.3 / jest-dom 7, commitlint 21, lint-staged 17, eslint-config-prettier 10, react-hooks plugin 7, globals 17, Vite 8 + plugin-react 6 + Vitest 5 + jsdom 30 (the workspace `vite` override moved to `^8.3.0` with them). **Declined, with `ignore` rules in `.github/dependabot.yml`:** Python 3.12 base images (every service pins `requires-python <3.12` to match Raspberry Pi OS, §7); Node 25 (non-LTS; stay on 22 LTS); ESLint/`@eslint/js` 10 (latest `eslint-plugin-react` 7.37.5 and `eslint-plugin-jsx-a11y` 6.10.2 crash or declare no support — confirmed by running lint); TypeScript 7 (typescript-eslint 8.71 peer range is `<6.1`), taken as **TypeScript 6.0** instead, the newest supported line | Merging 30 bot PRs one by one would have meant 30 rebases and CI runs, and most were red only because of the pre-DD-044 audit failures on `main`. Each update was gated on its own before committing: pip bumps via ruff/mypy/pytest for that service, npm bumps via the full toolbox TypeScript gate (frozen install, prettier, lint, typecheck, test, knip, `pnpm audit`); dashboard dev/prod images built locally after Vite 8. The ignore rules carry their removal condition inline so they are revisited rather than forgotten (§26) |
 
 ---
 
@@ -898,6 +899,9 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
 - The dashboard's historical log/trend charts (§6.5) are bounded by `api`'s `GET /state/history`
   1000-row cap, not the originally-scoped 24h window — needs pagination or a time-range query
   parameter on that endpoint to actually reach 24h at realistic publish intervals.
+- ESLint is held at 9 and TypeScript at 6.0 by `.github/dependabot.yml` ignore rules (DD-045)
+  because `eslint-plugin-react`/`eslint-plugin-jsx-a11y` don't support ESLint 10 and
+  typescript-eslint doesn't support TypeScript 7. Lift the rules when upstream catches up.
 - SensorRAG's numeric-grounding check (DD-033) verifies a claimed number is present in the retrieved
   context, not that it's attributed to the *correct* field — a response could quote a real context
   number but apply it to the wrong claim and still pass. Full claim-level semantic grounding needs
@@ -2029,6 +2033,37 @@ dataset download script; verify the GPIO buzzer on real hardware; rebuild the pa
 
 ---
 
+### Entry 19 — Dependabot backlog resolved (logical project time: 2026-10-17, same day)
+
+**Task completed:** Resolved all 30 open Dependabot PRs (#34–#77) per DD-045: every viable update
+re-applied as individual commits on `chore/dependabot-updates`, the incompatible ones declined with
+`ignore` rules, and every bot PR closed as superseded with its branch deleted.
+
+**Files modified:** `services/{edge,ml,copilot}/{pyproject.toml,uv.lock}`,
+`.github/workflows/{ci.yml,codeql.yml}`, `.github/dependabot.yml`, `apps/dashboard/Dockerfile`,
+`apps/dashboard/package.json`, `package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`, `design.md`
+(§15 DD-045, §26, §28, §29), `to_do.md`.
+
+**Files created / deleted:** None.
+
+**Reason for change:** User request to resolve and delete all Dependabot branches.
+
+**Architectural decisions:** DD-045.
+
+**Verification:** Per-update local gates as described in DD-045; `pip-audit` clean for all four
+services and `pnpm audit --audit-level=high` clean after the full set. CI on the PR is the merge gate.
+
+**Remaining work:** Revisit the DD-045 ignore rules when ESLint-10 support lands in
+`eslint-plugin-react`/`jsx-a11y` and when typescript-eslint supports TypeScript 7.
+
+**Known issues:** `ml`'s test suite went from ~21 s to ~100 s after onnxscript 0.7.2 (torch ONNX
+export path); still passes, worth a look if CI time matters.
+
+**Recommended next task:** Unchanged from Entry 18 — wire the DD-042 loaders into `ml.pipeline`;
+the stash's design decisions now renumber from DD-046 (DD-045 is taken by this entry).
+
+---
+
 ## 29. Current Repository State
 
 - **Branch:** `feature/dashboard-live-state`, pushed to `origin` but **no PR opened yet** — CI has
@@ -2084,6 +2119,8 @@ dataset download script; verify the GPIO buzzer on real hardware; rebuild the pa
   host user (DD-039), edge audible alerting (DD-040), ADXL345 identity gate + deadline pacing
   (DD-041), CWRU/IMS loaders + RUL regressor modules (DD-042), research paper sources (DD-043),
   dependency-audit fixes incl. knip 6 / vitest 4.1 / lint-staged 16 (DD-044).
+- **Entry 19 (2026-10-17)**: Dependabot backlog cleared (DD-045) — no open Dependabot PRs or
+  branches; dashboard on React 19 / Vite 8 / Vitest 5 / TypeScript 6.0, ESLint held at 9.
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-
