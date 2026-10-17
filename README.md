@@ -44,8 +44,10 @@ make phase2-on     # enable Phase 2 and start its services
 make phase2-off    # disable Phase 2 and stop its services (Phase 1 keeps running)
 ```
 
-You can also flip the flag, along with the publish interval and alert thresholds, from the
-dashboard's **Settings** panel or with `PATCH /config`. Running services switch within a few
+You can also flip the flag from the dashboard's **Settings** panel or with `PATCH /config`. The
+same config holds the other runtime settings: the publish interval and alert thresholds and, for
+Phase 2, the critical-alert fraction and the copilot's language model (`local`/`api`), freshness
+window and context size. Running services switch within a few
 seconds, without a restart. Starting or stopping the copilot container needs `make up` (or
 `make phase2-on` / `make phase2-off`). `ENABLE_PHASE2` in `.env` only seeds a fresh database.
 `make train` refuses while Phase 2 is off, since it produces the Phase 2 models.

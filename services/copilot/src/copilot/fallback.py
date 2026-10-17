@@ -7,10 +7,26 @@ path itself fails (`llm_unavailable_response`). Either way the copilot never
 returns an LLM-shaped answer without a working, grounded LLM call behind it.
 """
 
+from datetime import timedelta
 from typing import Any
 
+from copilot.context import STALE_AFTER
 
-def rule_based_response(states: list[dict[str, Any]]) -> str:
+_SECONDS_PER_MINUTE = 60
+_SECONDS_PER_HOUR = 3600
+
+
+def _describe(window: timedelta) -> str:
+    """5 minutes / 2 hours / 45 seconds — the largest whole unit that fits."""
+    seconds = int(window.total_seconds())
+    for unit_seconds, unit in ((_SECONDS_PER_HOUR, "hour"), (_SECONDS_PER_MINUTE, "minute")):
+        if seconds % unit_seconds == 0:
+            count = seconds // unit_seconds
+            return f"{count} {unit}{'' if count == 1 else 's'}"
+    return f"{seconds} second{'' if seconds == 1 else 's'}"
+
+
+def rule_based_response(states: list[dict[str, Any]], stale_after: timedelta = STALE_AFTER) -> str:
     if not states:
         return (
             "I don't have any recent sensor data for this machine yet, so I can't answer "
@@ -26,8 +42,9 @@ def rule_based_response(states: list[dict[str, Any]]) -> str:
         )
 
     return (
-        "The most recent sensor reading is more than 5 minutes old, so I don't have "
-        "current enough data to answer confidently. Please check the sensor connection."
+        f"The most recent sensor reading is more than {_describe(stale_after)} old, so I "
+        "don't have current enough data to answer confidently. Please check the sensor "
+        "connection."
     )
 
 

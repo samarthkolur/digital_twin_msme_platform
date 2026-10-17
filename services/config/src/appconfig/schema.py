@@ -12,6 +12,7 @@ directly; Python code uses the snake_case attribute names.
 from __future__ import annotations
 
 import os
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -23,6 +24,12 @@ DEFAULT_ENABLE_PHASE2 = False
 DEFAULT_PUBLISH_INTERVAL_SECONDS = 5.0
 DEFAULT_ALERT_HEALTH_INDEX = 0.6
 DEFAULT_ALERT_TEMPERATURE_C = 70.0
+DEFAULT_ALERT_CRITICAL_FRACTION = 0.75
+CopilotLlmMode = Literal["local", "api"]
+
+DEFAULT_COPILOT_LLM_MODE: CopilotLlmMode = "local"
+DEFAULT_COPILOT_STALE_AFTER_SECONDS = 300
+DEFAULT_COPILOT_CONTEXT_SIZE = 10
 
 
 class AppConfig(BaseModel):
@@ -55,6 +62,34 @@ class AppConfig(BaseModel):
         le=150,
         description="Surface temperature above this raises an alert.",
     )
+    alert_critical_fraction: float = Field(
+        default=DEFAULT_ALERT_CRITICAL_FRACTION,
+        gt=0,
+        le=1,
+        description=(
+            "A health index below alertHealthIndex x this fraction is critical rather than "
+            "a warning (Phase 2 only)."
+        ),
+    )
+    copilot_llm_mode: CopilotLlmMode = Field(
+        default=DEFAULT_COPILOT_LLM_MODE,
+        description=(
+            "Copilot LLM backend (Phase 2): local = TinyLlama via llama.cpp, no secrets; "
+            "api = Anthropic/OpenAI fallback, needs a key in $SECRETS_FILE."
+        ),
+    )
+    copilot_stale_after_seconds: int = Field(
+        default=DEFAULT_COPILOT_STALE_AFTER_SECONDS,
+        ge=10,
+        le=86400,
+        description="The copilot refuses to answer from readings older than this (Phase 2).",
+    )
+    copilot_context_size: int = Field(
+        default=DEFAULT_COPILOT_CONTEXT_SIZE,
+        ge=1,
+        le=1000,
+        description="How many recent readings the copilot retrieves as context (Phase 2).",
+    )
 
 
 class AppConfigUpdate(BaseModel):
@@ -66,6 +101,10 @@ class AppConfigUpdate(BaseModel):
     publish_interval_seconds: float | None = Field(default=None, gt=0, le=3600)
     alert_health_index: float | None = Field(default=None, ge=0, le=1)
     alert_temperature_c: float | None = Field(default=None, ge=-40, le=150)
+    alert_critical_fraction: float | None = Field(default=None, gt=0, le=1)
+    copilot_llm_mode: CopilotLlmMode | None = None
+    copilot_stale_after_seconds: int | None = Field(default=None, ge=10, le=86400)
+    copilot_context_size: int | None = Field(default=None, ge=1, le=1000)
 
 
 _ENV_SEEDS = {
@@ -73,6 +112,7 @@ _ENV_SEEDS = {
     "publish_interval_seconds": "PUBLISH_INTERVAL_SECONDS",
     "alert_health_index": "ALERT_HEALTH_INDEX",
     "alert_temperature_c": "ALERT_TEMPERATURE_C",
+    "copilot_llm_mode": "COPILOT_LLM_MODE",
 }
 
 

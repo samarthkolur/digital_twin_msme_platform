@@ -8,6 +8,8 @@ import type { DigitalTwinState } from "./api";
 export interface AlertThresholds {
   healthIndex: number;
   temperatureC: number;
+  /** A health index below healthIndex x this is critical, not a warning. */
+  criticalFraction: number;
 }
 
 interface DashboardAlert {
@@ -17,8 +19,9 @@ interface DashboardAlert {
 
 /**
  * Evaluates the alert module's configurable thresholds (design.md §6.5)
- * against a single state object. A health index below 75% of the threshold
- * is treated as critical rather than a warning; everything else that trips
+ * against a single state object. A health index below `criticalFraction` of
+ * the threshold (the config's alertCriticalFraction, 0.75 by default) is
+ * treated as critical rather than a warning; everything else that trips
  * a threshold is a warning. The model's own `alert_level` (once Phase 4
  * populates it) is surfaced as-is alongside the threshold-based checks
  * rather than replacing them.
@@ -30,7 +33,7 @@ export function evaluateAlerts(
   const alerts: DashboardAlert[] = [];
 
   if (state.health_index !== null && state.health_index < thresholds.healthIndex) {
-    const critical = state.health_index < thresholds.healthIndex * 0.75;
+    const critical = state.health_index < thresholds.healthIndex * thresholds.criticalFraction;
     alerts.push({
       level: critical ? "critical" : "warning",
       message: `Health index ${state.health_index.toFixed(2)} is below the ${thresholds.healthIndex.toFixed(2)} alert threshold`,

@@ -57,6 +57,7 @@ services:
       # with `make phase2-on|phase2-off`, the dashboard, or PATCH /config.
       ENABLE_PHASE2: ${ENABLE_PHASE2:-false}
       PUBLISH_INTERVAL_SECONDS: "5"
+      COPILOT_LLM_MODE: ${COPILOT_LLM_MODE:-local}
     volumes:
       - sqlite-data:/data
     develop:

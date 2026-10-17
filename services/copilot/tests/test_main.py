@@ -6,7 +6,7 @@ from copilot.service import QueryResponse
 
 
 class _StubEngine:
-    async def answer(self, query: str) -> QueryResponse:
+    async def answer(self, query: str, config: object = None) -> QueryResponse:
         return QueryResponse(
             answer=f"stub answer for: {query}", used_fallback=False, context_size=1
         )

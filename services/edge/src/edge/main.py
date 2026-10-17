@@ -82,11 +82,16 @@ async def read_and_publish_once(
         ),
     )
 
+    thresholds = alert_thresholds or AlertThresholds()
+
     ml_result = None
     if ml_engine is not None:
         try:
             ml_result = await asyncio.to_thread(
-                ml_engine.infer, sample.raw_vibration_window_g, sample.vibration
+                ml_engine.infer,
+                sample.raw_vibration_window_g,
+                sample.vibration,
+                thresholds.health_index,
             )
         except Exception:
             logger.exception("ML inference failed, leaving anomaly fields null for this reading")
@@ -96,7 +101,7 @@ async def read_and_publish_once(
     client.publish(STATE_MQTT_TOPIC, json.dumps(state))
 
     if buzzer is not None and state is not None:
-        alerts = evaluate_alerts(state, alert_thresholds or AlertThresholds())
+        alerts = evaluate_alerts(state, thresholds)
         level = highest_level(alerts)
         if level is not None:
             for alert in alerts:
@@ -149,6 +154,7 @@ async def publish_loop(
             AlertThresholds(
                 health_index=config.alert_health_index,
                 temperature_c=config.alert_temperature_c,
+                critical_fraction=config.alert_critical_fraction,
             ),
         )
 

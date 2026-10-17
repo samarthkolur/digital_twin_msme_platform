@@ -143,6 +143,7 @@ export function App(): JSX.Element {
             thresholds={{
               healthIndex: config.alertHealthIndex,
               temperatureC: config.alertTemperatureC,
+              criticalFraction: config.alertCriticalFraction,
             }}
           />
 

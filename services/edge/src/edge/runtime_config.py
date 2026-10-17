@@ -34,6 +34,10 @@ class RuntimeConfig:
     publish_interval_seconds: float
     alert_health_index: float
     alert_temperature_c: float
+    alert_critical_fraction: float = 0.75
+    copilot_llm_mode: str = "local"
+    copilot_stale_after_seconds: int = 300
+    copilot_context_size: int = 10
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> RuntimeConfig:
@@ -43,6 +47,7 @@ class RuntimeConfig:
             publish_interval_seconds=float(env.get("PUBLISH_INTERVAL_SECONDS", "5")),
             alert_health_index=float(env.get("ALERT_HEALTH_INDEX", "0.6")),
             alert_temperature_c=float(env.get("ALERT_TEMPERATURE_C", "70")),
+            copilot_llm_mode=env.get("COPILOT_LLM_MODE", "local"),
         )
 
     @classmethod
@@ -52,6 +57,12 @@ class RuntimeConfig:
             publish_interval_seconds=float(payload["publishIntervalSeconds"]),
             alert_health_index=float(payload["alertHealthIndex"]),
             alert_temperature_c=float(payload["alertTemperatureC"]),
+            # .get(): tolerate a config service from before these settings
+            # existed, so the two can be upgraded in either order.
+            alert_critical_fraction=float(payload.get("alertCriticalFraction", 0.75)),
+            copilot_llm_mode=str(payload.get("copilotLlmMode", "local")),
+            copilot_stale_after_seconds=int(payload.get("copilotStaleAfterSeconds", 300)),
+            copilot_context_size=int(payload.get("copilotContextSize", 10)),
         )
 
 

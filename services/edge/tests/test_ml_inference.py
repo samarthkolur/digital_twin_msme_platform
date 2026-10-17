@@ -123,3 +123,21 @@ def test_infer_with_elevated_features_flags_ood_and_low_health_index(tmp_path: P
     assert result.health_index < 0.6
     assert result.model_confidence == "low"
     assert result.alert_level == "alert"
+
+
+def test_infer_uses_the_given_alert_threshold(tmp_path: Path) -> None:
+    """The model's alert_level follows the configured alertHealthIndex
+    (design.md DD-047) rather than a fixed 0.6."""
+    _write_artifacts(tmp_path)
+    engine = MLInferenceEngine.load(tmp_path)
+    assert engine is not None
+    vibration = VibrationFeatures(
+        rms_g=1.0, kurtosis=1.0, crest_factor=1.0, peak_to_peak_g=1.0, sampling_hz=3200
+    )
+
+    healthy = engine.infer([1.0, 1.0, 1.0, 1.0], vibration)
+    stricter = engine.infer([1.0, 1.0, 1.0, 1.0], vibration, alert_threshold_health_index=1.01)
+
+    assert healthy.health_index == stricter.health_index == 1.0
+    assert healthy.alert_level == "normal"
+    assert stricter.alert_level == "alert"

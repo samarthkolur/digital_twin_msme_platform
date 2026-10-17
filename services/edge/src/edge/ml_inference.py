@@ -25,7 +25,10 @@ from edge.providers.base import VibrationFeatures
 
 logger = logging.getLogger("edge.ml_inference")
 
-# design.md §6.3: "calibrated so that... <0.6 = alert threshold."
+# design.md §6.3: "calibrated so that... <0.6 = alert threshold." Only the
+# default: the live value is the config's alertHealthIndex (design.md DD-047),
+# passed in per call so the model's alert_level and the threshold alerts can
+# never disagree.
 ALERT_THRESHOLD_HEALTH_INDEX = 0.6
 
 
@@ -107,7 +110,10 @@ class MLInferenceEngine:
         return float(np.clip(std_devs_above_baseline / self._std_devs_at_full_anomaly, 0.0, 1.0))
 
     def infer(
-        self, raw_vibration_window_g: list[float], vibration: VibrationFeatures
+        self,
+        raw_vibration_window_g: list[float],
+        vibration: VibrationFeatures,
+        alert_threshold_health_index: float = ALERT_THRESHOLD_HEALTH_INDEX,
     ) -> MLInferenceResult:
         feature_values = {
             "rms_g": vibration.rms_g,
@@ -153,5 +159,5 @@ class MLInferenceEngine:
             anomaly_score=isolation_forest_score,
             health_index=health_index,
             model_confidence="low" if is_out_of_distribution else "high",
-            alert_level="alert" if health_index < ALERT_THRESHOLD_HEALTH_INDEX else "normal",
+            alert_level="alert" if health_index < alert_threshold_health_index else "normal",
         )
