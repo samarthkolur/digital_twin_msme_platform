@@ -2073,11 +2073,11 @@ the stash's design decisions now renumber from DD-046 (DD-045 is taken by this e
 
 ### Entry 20 — Dependabot follow-up wave (logical project time: 2026-10-17, same day)
 
-**Task completed:** Resolved the 14 Dependabot PRs (#80–#93) that opened right after PR #79 merged.
-All 13 pip floor bumps were applied, one commit each (edge: onnxruntime ≥1.31, onnx ≥1.23.2,
+**Task completed:** Resolved the 16 Dependabot PRs (#80–#95) that opened right after PR #79 merged.
+All 15 pip floor bumps were applied, one commit each (edge: onnxruntime ≥1.31, onnx ≥1.23.2,
 pydantic ≥2.14.1, uvicorn ≥0.54, mypy ≥2.4; ml: onnxruntime ≥1.31, scikit-learn ≥1.9.1, onnx
 ≥1.23.2, skl2onnx ≥1.20, scipy ≥1.17.1; copilot: llama-cpp-python ≥0.3.36, fastapi ≥0.143,
-mypy ≥2.4), plus hadolint-action 3.5.0. Dependabot is now grouped (DD-046), and the edge test stubs
+mypy ≥2.4, uvicorn ≥0.54, pydantic ≥2.14.1), plus hadolint-action 3.5.0. Dependabot is now grouped (DD-046), and the edge test stubs
 pin their ONNX IR version (DD-046).
 
 **Files modified:** `services/{edge,ml,copilot}/{pyproject.toml,uv.lock}`,
@@ -2159,7 +2159,7 @@ Entry 18's recommendation.
   dependency-audit fixes incl. knip 6 / vitest 4.1 / lint-staged 16 (DD-044).
 - **Entry 19 (2026-10-17)**: Dependabot backlog cleared (DD-045) — no open Dependabot PRs or
   branches; dashboard on React 19 / Vite 8 / Vitest 5 / TypeScript 6.0, ESLint held at 9.
-- **Entry 20 (2026-10-17)**: follow-up Dependabot wave (#80–#93) applied and closed; Dependabot now
+- **Entry 20 (2026-10-17)**: follow-up Dependabot wave (#80–#95) applied and closed; Dependabot now
   groups pip (per service) and Actions updates (DD-046).
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
