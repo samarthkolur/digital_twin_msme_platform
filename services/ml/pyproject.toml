@@ -4,10 +4,10 @@ version = "0.1.0"
 description = "Digital Cousin ML training pipeline: Isolation Forest + 1D conv autoencoder on CWRU/IMS datasets"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "scikit-learn>=1.5",
+  "scikit-learn>=1.9.0",
   "torch>=2.5",
   "numpy>=2.0",
-  "pandas>=2.2",
+  "pandas>=3.0.5",
   # Reads real CWRU .mat files (ml.cwru_loader) — design.md DD-042.
   "scipy>=1.13",
   # ONNX export (design.md DD-031, supersedes the originally documented
@@ -18,14 +18,14 @@ dependencies = [
   "skl2onnx>=1.17",
   # torch>=2.9's default ONNX exporter is dynamo-based and requires this;
   # without it torch.onnx.export raises ModuleNotFoundError at call time.
-  "onnxscript>=0.2",
+  "onnxscript>=0.7.1",
 ]
 
 [dependency-groups]
 dev = [
-  "pytest>=8.3",
+  "pytest>=9.1.1",
   "pytest-cov>=6.0",
-  "mypy>=1.13",
+  "mypy>=2.3.1",
   # Dev-only: verifies rul.onnx round-trips through a real inference session
   # in tests, not used by the training pipeline itself (mirrors DD-002's
   # precedent for edge's dev-only `onnx` dep).
