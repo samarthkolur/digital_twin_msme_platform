@@ -14,32 +14,41 @@ type AlertLevelFilter = (typeof ALERT_LEVELS)[number];
 interface HistoryLogProps {
   /** Most-recent-first, as returned by the api. */
   history: DigitalTwinState[];
+  /**
+   * Show the ML-derived columns and the alert-level filter. Off in Phase 1,
+   * where there is no model output to show (design.md DD-047).
+   */
+  showPhase2?: boolean;
 }
 
-export function HistoryLog({ history }: HistoryLogProps): JSX.Element {
+export function HistoryLog({ history, showPhase2 = true }: HistoryLogProps): JSX.Element {
   const [filter, setFilter] = useState<AlertLevelFilter>("all");
 
   const filtered =
-    filter === "all" ? history : history.filter((s) => (s.alert_level ?? "normal") === filter);
+    !showPhase2 || filter === "all"
+      ? history
+      : history.filter((s) => (s.alert_level ?? "normal") === filter);
 
   return (
     <section aria-label="Historical log">
       <h3>Historical Log</h3>
-      <label>
-        Filter by alert level
-        <select
-          value={filter}
-          onChange={(event) => {
-            setFilter(event.target.value as AlertLevelFilter);
-          }}
-        >
-          {ALERT_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {level}
-            </option>
-          ))}
-        </select>
-      </label>
+      {showPhase2 && (
+        <label>
+          Filter by alert level
+          <select
+            value={filter}
+            onChange={(event) => {
+              setFilter(event.target.value as AlertLevelFilter);
+            }}
+          >
+            {ALERT_LEVELS.map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       {filtered.length === 0 ? (
         <p>No readings match this filter.</p>
       ) : (
@@ -49,8 +58,8 @@ export function HistoryLog({ history }: HistoryLogProps): JSX.Element {
               <th scope="col">Timestamp</th>
               <th scope="col">Vibration RMS (g)</th>
               <th scope="col">Temperature (°C)</th>
-              <th scope="col">Health index</th>
-              <th scope="col">Alert level</th>
+              {showPhase2 && <th scope="col">Health index</th>}
+              {showPhase2 && <th scope="col">Alert level</th>}
             </tr>
           </thead>
           <tbody>
@@ -59,8 +68,8 @@ export function HistoryLog({ history }: HistoryLogProps): JSX.Element {
                 <td>{s.timestamp}</td>
                 <td>{s.vibration.rms_g}</td>
                 <td>{s.temperature_c}</td>
-                <td>{s.health_index ?? "—"}</td>
-                <td>{s.alert_level ?? "normal"}</td>
+                {showPhase2 && <td>{s.health_index ?? "—"}</td>}
+                {showPhase2 && <td>{s.alert_level ?? "normal"}</td>}
               </tr>
             ))}
           </tbody>

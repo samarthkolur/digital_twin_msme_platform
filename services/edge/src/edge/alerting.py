@@ -22,10 +22,10 @@ from typing import Any, Literal, Protocol
 
 logger = logging.getLogger("edge.alerting")
 
-# Matches DEFAULT_HEALTH_INDEX_ALERT_THRESHOLD / DEFAULT_TEMPERATURE_ALERT_THRESHOLD_C
-# in apps/dashboard/src/thresholds.ts. The temperature value has no
-# pilot-machine calibration yet (design.md §24) — it is an operator-overridable
-# placeholder, not a calibrated figure.
+# Defaults only: the live values come from the config service (design.md
+# DD-047) and match DEFAULT_CONFIG in apps/dashboard/src/config.ts. The
+# temperature value has no pilot-machine calibration yet (design.md §24) — it
+# is an operator-overridable placeholder, not a calibrated figure.
 DEFAULT_HEALTH_INDEX_THRESHOLD = 0.6
 DEFAULT_TEMPERATURE_THRESHOLD_C = 70.0
 
