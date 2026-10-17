@@ -6,7 +6,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
   "fastapi>=0.141.1",
   "uvicorn[standard]>=0.52.3",
-  "pydantic>=2.9",
+  "pydantic>=2.14.1",
   "paho-mqtt>=2.1",
   # ONNX inference (design.md DD-031) for services/ml's exported Isolation
   # Forest + autoencoder models. Ships prebuilt wheels (no native compiler
