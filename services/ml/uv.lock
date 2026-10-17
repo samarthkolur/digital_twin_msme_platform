@@ -215,7 +215,7 @@ requires-dist = [
     { name = "onnx", specifier = ">=1.17" },
     { name = "onnxscript", specifier = ">=0.7.1" },
     { name = "pandas", specifier = ">=3.0.5" },
-    { name = "scikit-learn", specifier = ">=1.9.0" },
+    { name = "scikit-learn", specifier = ">=1.9.1" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "skl2onnx", specifier = ">=1.17" },
     { name = "torch", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cpu" },
