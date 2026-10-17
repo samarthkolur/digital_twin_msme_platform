@@ -7,7 +7,8 @@ import httpx
 
 API_URL = os.environ.get("API_URL", "http://api:8000")
 # design.md §6.4: "the last 10 state objects (covering ~10 seconds of data
-# or ~10 historical readings, depending on query type)".
+# or ~10 historical readings, depending on query type)". Default only: the
+# live value is the config's copilotContextSize (design.md DD-047).
 DEFAULT_RETRIEVAL_LIMIT = 10
 
 

@@ -1,9 +1,11 @@
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
+import pytest
 
+from copilot.runtime_config import RuntimeConfig
 from copilot.service import LLMClient, QueryEngine
 
 
@@ -91,3 +93,66 @@ def test_answer_degrades_gracefully_when_the_llm_call_fails() -> None:
 
     assert response.used_fallback is True
     assert "dashboard" in response.answer.lower()
+
+
+def _config(**overrides: object) -> RuntimeConfig:
+    values: dict[str, object] = {
+        "enable_phase2": True,
+        "publish_interval_seconds": 5.0,
+        "alert_health_index": 0.6,
+        "alert_temperature_c": 70.0,
+        **overrides,
+    }
+    return RuntimeConfig(**values)  # type: ignore[arg-type]
+
+
+def test_answer_retrieves_the_configured_number_of_readings() -> None:
+    limits: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        limits.append(request.url.params["limit"])
+        return httpx.Response(200, content=json.dumps([_fresh_state()]))
+
+    client = httpx.AsyncClient(base_url="http://api:8000", transport=httpx.MockTransport(handler))
+    engine = QueryEngine(retrieval_client=client, llm_client=_FakeLLMClient())
+
+    asyncio.run(engine.answer("Is it okay?", _config(copilot_context_size=25)))
+
+    assert limits == ["25"]
+
+
+def test_answer_uses_the_configured_freshness_window() -> None:
+    two_minutes_old = _fresh_state(timestamp=(datetime.now(UTC) - timedelta(minutes=2)).isoformat())
+    engine = QueryEngine(
+        retrieval_client=_client_with_states([two_minutes_old]), llm_client=_FakeLLMClient()
+    )
+
+    lenient = asyncio.run(engine.answer("q", _config(copilot_stale_after_seconds=300)))
+    strict = asyncio.run(engine.answer("q", _config(copilot_stale_after_seconds=60)))
+
+    assert lenient.used_fallback is False
+    assert strict.used_fallback is True
+    assert "1 minute old" in strict.answer
+
+
+def test_answer_builds_one_llm_client_per_configured_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import copilot.service as service_module
+
+    built: list[str] = []
+
+    def fake_build(mode: str) -> LLMClient:
+        built.append(mode)
+        return _FakeLLMClient(f"answer via {mode}")
+
+    monkeypatch.setattr(service_module, "_build_llm_client", fake_build)
+    engine = QueryEngine(retrieval_client=_client_with_states([_fresh_state()]))
+
+    first = asyncio.run(engine.answer("q", _config(copilot_llm_mode="api")))
+    asyncio.run(engine.answer("q", _config(copilot_llm_mode="api")))
+    other = asyncio.run(engine.answer("q", _config(copilot_llm_mode="local")))
+
+    assert first.answer == "answer via api"
+    assert other.answer == "answer via local"
+    assert built == ["api", "local"], "clients are reused per mode, not rebuilt per query"

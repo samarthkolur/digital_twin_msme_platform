@@ -18,3 +18,12 @@ def test_stale_message_mentions_5_minutes() -> None:
 
 def test_llm_unavailable_message_points_to_the_dashboard() -> None:
     assert "dashboard" in llm_unavailable_response().lower()
+
+
+def test_stale_message_describes_the_configured_window() -> None:
+    from datetime import timedelta
+
+    fresh_enough = [{"model_confidence": "high"}]
+    assert "2 hours" in rule_based_response(fresh_enough, timedelta(hours=2))
+    assert "1 minute old" in rule_based_response(fresh_enough, timedelta(seconds=60))
+    assert "45 seconds" in rule_based_response(fresh_enough, timedelta(seconds=45))

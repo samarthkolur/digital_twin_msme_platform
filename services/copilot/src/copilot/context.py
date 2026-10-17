@@ -8,10 +8,12 @@ answer."
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+# Default only: the live value is the config's copilotStaleAfterSeconds
+# (design.md DD-047).
 STALE_AFTER = timedelta(minutes=5)
 
 
-def context_is_valid(states: list[dict[str, Any]]) -> bool:
+def context_is_valid(states: list[dict[str, Any]], stale_after: timedelta = STALE_AFTER) -> bool:
     """`states` is most-recent-first (design.md §6.4's retrieval order,
     `retrieval.retrieve_recent_states`) — only the newest reading's
     freshness/confidence gates validity; older readings in the window are
@@ -32,4 +34,4 @@ def context_is_valid(states: list[dict[str, Any]]) -> bool:
     except ValueError:
         return False
 
-    return datetime.now(UTC) - timestamp <= STALE_AFTER
+    return datetime.now(UTC) - timestamp <= stale_after

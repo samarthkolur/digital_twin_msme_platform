@@ -1,17 +1,23 @@
 """Query orchestration (design.md §6.4): retrieve -> validate context ->
-rule-based fallback OR LLM call, dispatched by COPILOT_LLM_MODE.
+rule-based fallback OR LLM call, dispatched by the configured LLM mode.
+
+The LLM mode, context size and freshness window come from the project config
+(design.md DD-047) per query, so changing them takes effect on the next
+question without restarting the copilot.
 """
 
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Protocol
 
 import httpx
 
-from copilot.context import context_is_valid
+from copilot.context import STALE_AFTER, context_is_valid
 from copilot.fallback import llm_unavailable_response, rule_based_response
 from copilot.prompt import SYSTEM_PROMPT, build_user_prompt
-from copilot.retrieval import retrieve_recent_states
+from copilot.retrieval import DEFAULT_RETRIEVAL_LIMIT, retrieve_recent_states
+from copilot.runtime_config import RuntimeConfig
 
 
 class LLMClient(Protocol):
@@ -50,31 +56,48 @@ class QueryEngine:
         retrieval_client: httpx.AsyncClient | None = None,
         llm_client: LLMClient | None = None,
     ) -> None:
-        self._llm_mode = llm_mode or os.environ.get("COPILOT_LLM_MODE", "local")
+        self._default_llm_mode = llm_mode or os.environ.get("COPILOT_LLM_MODE", "local")
         self._retrieval_client = retrieval_client
-        self._llm_client: LLMClient | None = llm_client
+        # An injected client (tests, the SensorRAG harness) serves every mode.
+        self._injected_llm_client = llm_client
+        # Built lazily and kept per mode, so switching copilotLlmMode back and
+        # forth doesn't reload a local model each time.
+        self._llm_clients: dict[str, LLMClient] = {}
 
-    async def answer(self, query: str) -> QueryResponse:
-        states = await retrieve_recent_states(client=self._retrieval_client)
-        return await self.answer_with_context(query, states)
+    async def answer(self, query: str, config: RuntimeConfig | None = None) -> QueryResponse:
+        limit = config.copilot_context_size if config else DEFAULT_RETRIEVAL_LIMIT
+        states = await retrieve_recent_states(limit=limit, client=self._retrieval_client)
+        return await self.answer_with_context(
+            query,
+            states,
+            stale_after=(
+                timedelta(seconds=config.copilot_stale_after_seconds) if config else STALE_AFTER
+            ),
+            llm_mode=config.copilot_llm_mode if config else None,
+        )
 
-    async def answer_with_context(self, query: str, states: list[dict[str, Any]]) -> QueryResponse:
+    async def answer_with_context(
+        self,
+        query: str,
+        states: list[dict[str, Any]],
+        stale_after: timedelta = STALE_AFTER,
+        llm_mode: str | None = None,
+    ) -> QueryResponse:
         """Same logic as `answer`, but with the retrieved state objects
         supplied directly rather than fetched from `api` — used by the
         SensorRAG evaluation harness (`copilot.sensorrag`, design.md DD-030)
         to run deterministic held-out cases without a live api service.
         """
-        if not context_is_valid(states):
+        if not context_is_valid(states, stale_after):
             return QueryResponse(
-                answer=rule_based_response(states), used_fallback=True, context_size=len(states)
+                answer=rule_based_response(states, stale_after),
+                used_fallback=True,
+                context_size=len(states),
             )
 
         try:
-            if self._llm_client is None:
-                self._llm_client = _build_llm_client(self._llm_mode)
-            answer = await self._llm_client.generate(
-                SYSTEM_PROMPT, build_user_prompt(query, states)
-            )
+            llm_client = self._llm_client_for(llm_mode or self._default_llm_mode)
+            answer = await llm_client.generate(SYSTEM_PROMPT, build_user_prompt(query, states))
             return QueryResponse(answer=answer, used_fallback=False, context_size=len(states))
         except Exception:
             # Any LLM-path failure (missing weights, missing API key, network
@@ -84,3 +107,10 @@ class QueryEngine:
             return QueryResponse(
                 answer=llm_unavailable_response(), used_fallback=True, context_size=len(states)
             )
+
+    def _llm_client_for(self, mode: str) -> LLMClient:
+        if self._injected_llm_client is not None:
+            return self._injected_llm_client
+        if mode not in self._llm_clients:
+            self._llm_clients[mode] = _build_llm_client(mode)
+        return self._llm_clients[mode]

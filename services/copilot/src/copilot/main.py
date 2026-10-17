@@ -50,12 +50,13 @@ class QueryResponseBody(BaseModel):
 async def query(request: QueryRequest) -> dict[str, object]:
     assert _engine is not None
     assert _config is not None
-    if not _config.get().enable_phase2:
+    config = _config.get()
+    if not config.enable_phase2:
         raise HTTPException(
             status_code=503,
             detail="The copilot is a Phase 2 feature and Phase 2 is disabled (enablePhase2=false).",
         )
-    result = await _engine.answer(request.query)
+    result = await _engine.answer(request.query, config)
     return {
         "answer": result.answer,
         "used_fallback": result.used_fallback,
