@@ -1,7 +1,7 @@
 // Mirrors `services/api/src/api/main.py`'s `StateResponse`/`VibrationFeaturesResponse`
 // (design.md §6.0, DD-026 duplication rationale) — no shared package between the
 // TypeScript and Python sides, so this shape must be kept in sync by hand.
-export interface VibrationFeatures {
+interface VibrationFeatures {
   rms_g: number;
   kurtosis: number;
   crest_factor: number;
