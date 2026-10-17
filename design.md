@@ -2077,10 +2077,12 @@ the stash's design decisions now renumber from DD-046 (DD-045 is taken by this e
 All 15 pip floor bumps were applied, one commit each (edge: onnxruntime ≥1.31, onnx ≥1.23.2,
 pydantic ≥2.14.1, uvicorn ≥0.54, mypy ≥2.4; ml: onnxruntime ≥1.31, scikit-learn ≥1.9.1, onnx
 ≥1.23.2, skl2onnx ≥1.20, scipy ≥1.17.1; copilot: llama-cpp-python ≥0.3.36, fastapi ≥0.143,
-mypy ≥2.4, uvicorn ≥0.54, pydantic ≥2.14.1), plus hadolint-action 3.5.0. Dependabot is now grouped (DD-046), and the edge test stubs
+mypy ≥2.4, uvicorn ≥0.54, pydantic ≥2.14.1), plus hadolint-action 3.5.0. `services/api` was aligned to the
+same floors pre-emptively (fastapi ≥0.143, uvicorn ≥0.54, pydantic ≥2.14.1, pytest ≥9.1.1,
+pytest-cov ≥7.1, mypy ≥2.4), so it doesn't start its own wave before grouping takes effect. Dependabot is now grouped (DD-046), and the edge test stubs
 pin their ONNX IR version (DD-046).
 
-**Files modified:** `services/{edge,ml,copilot}/{pyproject.toml,uv.lock}`,
+**Files modified:** `services/{edge,api,ml,copilot}/{pyproject.toml,uv.lock}`,
 `services/edge/tests/test_ml_inference.py`, `.github/workflows/ci.yml`, `.github/dependabot.yml`,
 `design.md` (§15 DD-046, §25, §28, §29).
 
