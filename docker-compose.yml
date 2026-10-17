@@ -41,6 +41,35 @@ services:
       test: ["CMD-SHELL", "nc -z localhost 1883 || exit 1"]
       <<: *py-healthcheck
 
+  # --- Project-wide runtime config (design.md DD-047). Owns the app_config
+  # table in the shared SQLite volume; every other service reads it over HTTP.
+  config:
+    build:
+      context: .
+      dockerfile: services/config/Dockerfile
+      target: dev
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_PATH: /data/digital_cousin.sqlite3
+      # Seeds for a fresh database only. Once a setting is stored, change it
+      # with `make phase2-on|phase2-off`, the dashboard, or PATCH /config.
+      ENABLE_PHASE2: ${ENABLE_PHASE2:-false}
+      PUBLISH_INTERVAL_SECONDS: "5"
+    volumes:
+      - sqlite-data:/data
+    develop:
+      watch:
+        - path: ./services/config/src
+          target: /app/src
+          action: sync
+        - path: ./services/config/pyproject.toml
+          action: rebuild
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8002/health"]
+      <<: *py-healthcheck
+
   edge:
     build:
       context: .
@@ -50,12 +79,17 @@ services:
     depends_on:
       mosquitto:
         condition: service_healthy
+      config:
+        condition: service_healthy
     environment:
       SENSOR_PROVIDER: ${SENSOR_PROVIDER:-simulated}
       ASSET_ID: ${ASSET_ID:-motor_01}
       MQTT_HOST: mosquitto
       MQTT_PORT: "1883"
       DATABASE_PATH: /data/digital_cousin.sqlite3
+      CONFIG_URL: http://config:8002
+      # Fallbacks used only until the config service first answers.
+      ENABLE_PHASE2: ${ENABLE_PHASE2:-false}
       PUBLISH_INTERVAL_SECONDS: "5"
       ML_ARTIFACTS_DIR: /app/ml-artifacts
       # Audible alerting (design.md DD-040): "none" never touches GPIO, so dev
@@ -105,12 +139,18 @@ services:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       <<: *py-healthcheck
 
+  # --- Phase 2 only: started when enablePhase2 is on (`make up`/`make watch`
+  # read it from the config database and add the "phase2" profile).
   copilot:
+    profiles: ["phase2"]
     build:
       context: .
       dockerfile: services/copilot/Dockerfile
       target: dev
     restart: unless-stopped
+    depends_on:
+      config:
+        condition: service_healthy
     ports:
       - "8001:8001"
     env_file:
@@ -124,6 +164,8 @@ services:
     environment:
       COPILOT_LLM_MODE: ${COPILOT_LLM_MODE:-local}
       API_URL: http://api:8000
+      CONFIG_URL: http://config:8002
+      ENABLE_PHASE2: ${ENABLE_PHASE2:-false}
     develop:
       watch:
         - path: ./services/copilot/src
@@ -146,6 +188,7 @@ services:
     environment:
       VITE_API_URL: http://localhost:8000
       VITE_COPILOT_URL: http://localhost:8001
+      VITE_CONFIG_URL: http://localhost:8002
     develop:
       watch:
         - path: ./apps/dashboard/src
@@ -160,7 +203,8 @@ services:
       test: ["CMD", "curl", "-fsS", "http://localhost:5173/"]
       <<: *py-healthcheck
 
-  # --- Training job: not started by `up`/`watch`. Run via `make train`.
+  # --- Training job: not started by `up`/`watch`. Run via `make train`, which
+  # refuses while Phase 2 is disabled (the models are a Phase 2 feature).
   ml-trainer:
     profiles: ["training"]
     build:

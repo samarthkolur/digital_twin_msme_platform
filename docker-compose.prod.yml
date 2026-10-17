@@ -23,6 +23,15 @@ services:
         limits:
           memory: 256M
 
+  config:
+    build:
+      target: prod
+    develop: !reset []
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   api:
     build:
       target: prod
