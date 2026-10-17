@@ -34,7 +34,7 @@ dev = [
   # Test-only: hand-builds tiny stub ONNX graphs to exercise edge.ml_inference
   # without depending on services/ml's actual training stack (sklearn/torch)
   # — edge and ml stay independent services per DD-002.
-  "onnx>=1.17",
+  "onnx>=1.23.2",
 ]
 
 [build-system]
