@@ -38,5 +38,5 @@ RUN chown -R dashboard:dashboard /usr/share/nginx/html /var/cache/nginx /var/run
 	&& chown dashboard:dashboard /var/run/nginx.pid
 USER dashboard
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD wget -qO- http://localhost:8080/ || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s CMD ["sh", "-c", "wget -qO- http://127.0.0.1:8080/ || exit 1"]
 CMD ["nginx", "-g", "daemon off;"]

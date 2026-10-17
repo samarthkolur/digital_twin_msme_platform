@@ -23,21 +23,41 @@ updates:
     directory: /services/edge
     schedule:
       interval: weekly
+    # One PR per service instead of one per package: these bumps only raise
+    # pyproject floors to what uv.lock already resolves (design.md DD-046).
+    groups:
+      python-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: pip
     directory: /services/api
     schedule:
       interval: weekly
+    # One PR per service instead of one per package: these bumps only raise
+    # pyproject floors to what uv.lock already resolves (design.md DD-046).
+    groups:
+      python-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: pip
     directory: /services/copilot
     schedule:
       interval: weekly
+    # One PR per service instead of one per package: these bumps only raise
+    # pyproject floors to what uv.lock already resolves (design.md DD-046).
+    groups:
+      python-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: pip
     directory: /services/ml
     schedule:
       interval: weekly
+    # One PR per service instead of one per package: these bumps only raise
+    # pyproject floors to what uv.lock already resolves (design.md DD-046).
+    groups:
+      python-dependencies:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directory: /apps/dashboard
@@ -103,3 +123,6 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
