@@ -224,7 +224,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "mypy", specifier = ">=2.3.1" },
-    { name = "onnxruntime", specifier = ">=1.19" },
+    { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=6.0" },
 ]

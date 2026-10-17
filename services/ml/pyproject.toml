@@ -29,7 +29,7 @@ dev = [
   # Dev-only: verifies rul.onnx round-trips through a real inference session
   # in tests, not used by the training pipeline itself (mirrors DD-002's
   # precedent for edge's dev-only `onnx` dep).
-  "onnxruntime>=1.19",
+  "onnxruntime>=1.31.0",
 ]
 
 [build-system]
