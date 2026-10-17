@@ -420,7 +420,10 @@ The following limitations are explicitly acknowledged to maintain academic integ
 │   │       │                     if present, else disables inference (null fields, §24)
 │   │       ├── storage.py        RawReadingStore (DD-023, DD-024) + StateStore (DD-026, now
 │   │       │                     writes ML-derived fields when an MLInferenceResult exists)
-│   │       └── main.py            MQTT publish loop (DD-025) + ML inference + FastAPI lifespan
+│   │       ├── alerting.py       evaluate_alerts (mirrors dashboard thresholds.ts) + Buzzer
+│   │       │                     protocol: NullBuzzer default, GpioBuzzer on a Pi (DD-040)
+│   │       └── main.py            MQTT publish loop (DD-025, deadline-paced per DD-041) + ML
+│   │                             inference + audible alerting + FastAPI lifespan
 │   ├── api/                REST API over the digital-twin state object (FastAPI)
 │   │   └── src/api/
 │   │       ├── storage.py        StateReader — reads `state_history` (DD-026, schema
@@ -449,6 +452,11 @@ The following limitations are explicitly acknowledged to maintain academic integ
 │           │                     download is still pending (§24), DD-031
 │           ├── datasets.py       real CWRU/IMS loader interface — raises a clear error until
 │           │                     the datasets are downloaded, rather than silently faking data
+│           ├── cwru_metadata.py  CWRU_FILE_INFO — label → URL → condition catalog (DD-042)
+│           ├── cwru_loader.py    load_cwru_windows — .mat files → labelled windows (DD-042)
+│           ├── ims_loader.py     load_ims_windows / load_ims_rul_windows — IMS ASCII snapshots
+│           │                     → windows + life-fraction targets (DD-042)
+│           ├── rul.py            Ridge RUL regressor: train/evaluate/predict + ONNX export (DD-042)
 │           ├── isolation_forest.py   train + ONNX export (skl2onnx, DD-031)
 │           ├── autoencoder.py    Conv1DAutoencoder (PyTorch) — arbitrary window length via a
 │           │                     final interpolate-to-input-length step; ONNX export
@@ -456,18 +464,23 @@ The following limitations are explicitly acknowledged to maintain academic integ
 │           ├── health_index.py   calibrate_health_index/compute_health_index (§6.3)
 │           ├── evaluate.py       F1 evaluation helper (design.md §9's targets)
 │           └── pipeline.py       run_training_pipeline — orchestrates all of the above into
-│                                 artifacts/ (ONNX models + calibration + manifest.json)
+│                                 artifacts/ (ONNX models + calibration + manifest.json); not yet
+│                                 wired to the DD-042 loaders (§24)
+│       └── scripts/
+│           └── make_paper_figures.py  regenerates docs/research/figures/ from real data (DD-043)
 ├── packages/                Shared TypeScript packages (empty — DD-013/DD-020: no 2nd TS
 │                            consumer yet; `pnpm-workspace.yaml` already globs `packages/*`)
 ├── docs/
 │   ├── architecture/        Standalone architecture docs once a topic outgrows §6 (DD-020)
 │   ├── adr/                 Standalone ADRs promoted from the §15 DD-NNN table (DD-020)
-│   ├── research/            Research notes/evaluation write-ups beyond §8-9 (DD-020)
+│   ├── research/            Research notes/evaluation write-ups beyond §8-9 (DD-020);
+│   │                        digital_cousin_paper.{tex,pdf,docx} + figures/ (DD-043)
 │   └── hardware/            Wiring diagrams/datasheets/retrofit notes beyond §6.2 (DD-020)
 ├── infra/
 │   └── mosquitto/           Local MQTT broker config
 ├── docker/
-│   └── tools.Dockerfile     Toolbox image: node+pnpm+python+uv+ruff+git, used by hooks/Makefile/CI
+│   └── tools.Dockerfile     Toolbox image: node+pnpm+python+uv+ruff+git, used by hooks/Makefile/CI;
+│                            runs as the host UID/GID (DD-039)
 ├── scripts/
 │   └── bootstrap.sh         Host validation + local env prep (the only pre-Docker step)
 ├── .github/
@@ -533,7 +546,12 @@ FastAPI services; ml is an on-demand training job).
 | DD-035 | `services/edge/src/edge/providers/__init__.py`'s `get_provider("simulated")` branch lazily imports `SimulatedSensorProvider` inside the function body, matching the existing lazy-import pattern already used for `"hardware"` | Entry 13 added `edge.providers.simulated`'s import of `edge.features.compute_vibration_features` (so the simulated provider derives its four statistical features from a real raw window via the same function `hardware.py` uses, DD-031's window-shape consistency goal) — but `edge.features` itself imports `edge.providers.base.VibrationFeatures`, and Python always runs a package's `__init__.py` before any of its submodules. The result was a real circular import (`edge.features` → `edge.providers` package init → `edge.providers.simulated` → `edge.features`, still mid-initialization) that broke on any entry point importing `edge.features` first (e.g. `tests/test_features.py`) — never previously exercised because nothing imported `edge.features` directly before this session's `make test` run. Lazy import breaks the cycle without restructuring the module layout |
 | DD-036 | This session's Docker-based verification (`make lint`/`typecheck`/`test`, `docker compose build`, `make train-synthetic`, `docker compose up`) ran on a fresh Ubuntu Docker install where `docker compose run`'s default user is root inside every container, including the `toolbox` container Husky's pre-commit hook shells into (§7.6) — every hook-triggered `git` operation (`lint-staged`'s internal `git stash`) and every bind-mounted write (`services/ml/artifacts/`, `.venv/`, coverage output) left files/`.git` internals root-owned on the host, which then blocked the *next* host-side `git commit` with "insufficient permission for adding an object to repository database." Fixed per-occurrence with a throwaway `docker run --rm -v "$(pwd):/repo" alpine chown -R "$(id -u)":"$(id -g)" /repo` rather than any project-file or git-config change | This is a distinct root cause from the DD-030/Entry-12 Windows/NTFS executable-bit issue (§25) — confirmed in this entry: `.husky/commit-msg`/`.husky/pre-commit`/`scripts/bootstrap.sh` show **zero** mode diff on this Ubuntu checkout (`git diff --summary` clean), so that specific historical concern does not reproduce here and needs no `core.filemode` change. The *new* finding is that Husky's own hook invocation (not the checkout) intermittently reintroduces spurious `+x` bits and root ownership on newly-created tracked files via the same toolbox-container mechanism — worth a future look at running the toolbox container with `--user "$(id -u):$(id -g)"` (tracked as Technical Debt, §26) so host-side git operations never need a manual chown afterward |
 | DD-037 | `pnpm-workspace.yaml`'s `overrides` gained six entries (`fast-uri`, `js-yaml`, `postcss`, `nanoid`, and two parent-scoped `brace-expansion` entries) after PR #61's first CI run failed `pnpm audit --audit-level=high` with newly-disclosed advisories in transitive dev-tooling deps (commitlint→ajv→fast-uri; eslint's own js-yaml/minimatch→brace-expansion chain; vitest coverage's glob→minimatch→brace-expansion chain) — none tied to any code change in this branch, same category as DD-018's pre-existing `vite` override. `brace-expansion` specifically needed **parent-scoped** overrides (`minimatch@3>brace-expansion: "^1.1.18"`, `minimatch@9>brace-expansion: "^2.1.4"`, pnpm's documented `parent@range>child` syntax) rather than a single blanket one | Two real mistakes made and corrected while fixing this, both confirmed by actually re-running `make lint`/`pnpm audit` after each attempt rather than assumed: (1) a blanket `brace-expansion: ">=5.0.9"` override collapsed *every* consumer (including `minimatch@3.1.5`, which calls a `.braceExpand` API only `brace-expansion`'s 1.x line has) onto the newest line, breaking ESLint outright (`TypeError: expand is not a function`) — parent-scoping by consumer, not just the target package, was required. (2) the parent-scoped override still didn't stick until the *target* range was changed from open-ended `>=1.1.18` to caret `^1.1.18` — pnpm resolves an open-ended `>=` range to the newest version satisfying that inequality (5.0.9 numerically satisfies `>=1.1.18`), not "newest within that major line," so it silently reproduced mistake (1) even though the parent scope was correct. `pnpm why brace-expansion` after each attempt is what surfaced both mistakes concretely rather than trusting the override syntax alone |
-| DD-038 | Added `scripts/bootstrap.ps1` and `scripts/make.ps1` as native-Windows (PowerShell, no WSL) equivalents of `scripts/bootstrap.sh` and the `Makefile`'s targets, rather than making WSL2 mandatory or rewriting the onboarding flow around a cross-platform task runner (npm scripts, `just`, etc.) | The user reported the project wouldn't run when the repo was opened on Windows. Root cause (found by inspection, not a repro): `docker compose watch`/`up`/`down`/`build`/`logs`/`ps` are already plain Docker CLI calls and work unmodified on any host OS, but the *onboarding* step (`scripts/bootstrap.sh`) is a bash script and every quality-gate command goes through `make`, and stock Windows ships neither bash nor GNU Make. WSL2 remains the recommended path (full parity, matches how this project has actually been verified per §28 Entries 14/15) and is documented first in the README; the PowerShell scripts are a second, no-WSL-required path for users who want to run the app without installing WSL2 at all. Both `.ps1` files are deliberately line-for-line translations of their bash/Make originals (no added logic, no behavior divergence) specifically so they don't drift into a second, differently-behaved onboarding flow — keep all three in sync on any future change |
+| DD-038 | Added `scripts/bootstrap.ps1` and `scripts/make.ps1` as native-Windows (PowerShell, no WSL) equivalents of `scripts/bootstrap.sh` and the `Makefile`'s targets, rather than making WSL2 mandatory or rewriting the onboarding flow around a cross-platform task runner (npm scripts, `just`, etc.) | The user reported the project wouldn't run when the repo was opened on Windows. Root cause (found by inspection, not a repro): `docker compose watch`/`up`/`down`/`build`/`logs`/`ps` are already plain Docker CLI calls and work unmodified on any host OS, but the *onboarding* step (`scripts/bootstrap.sh`) is a bash script and every quality-gate command goes through `make`, and stock Windows ships neither bash nor GNU Make. WSL2 remains the recommended path (full parity, matches how this project has actually been verified per §28 Entries 14/15) and is documented first in the README; the PowerShell scripts are a second, no-WSL-required path for users who want to run the app without installing WSL2 at all. Both `.ps1` files are deliberately line-for-line translations of their bash/Make originals (no added logic, no behavior divergence) specifically so they don't drift into a second, differently-behaved onboarding flow — keep all three in sync on any future change. **Withdrawn (Entry 18):** both `.ps1` files and the README's Windows subsection were removed by the project owner; no reason was recorded in the working tree. Windows hosts are expected to use WSL2 + Docker Desktop, where `bootstrap.sh` and `make` run unmodified |
+| DD-039 | The `toolbox` service runs as the invoking host user: `docker-compose.yml` sets `user: "${TOOLBOX_UID:-0}:${TOOLBOX_GID:-0}"`, the `Makefile` exports `TOOLBOX_UID`/`TOOLBOX_GID` from `id -u`/`id -g`, and both Husky hooks set them inline. `docker/tools.Dockerfile` moves `HOME`/XDG/corepack/npm caches to a world-writable `/opt/toolbox-home`, bakes `pnpm@11.11.0` in via `corepack prepare` (kept in step with `package.json`'s `packageManager`), and installs ruff's shim into `/usr/local/bin` | Resolves DD-036 / the §26 Technical Debt item at the source rather than per-occurrence `chown`: every write through the bind mount (coverage, caches, formatted sources, git objects from lint-staged's stash) now lands owned by the host user. The `0:0` default keeps any direct `docker compose run toolbox` invocation working exactly as before. Baking pnpm in is required, not cosmetic — a non-root UID cannot write to a root-owned corepack download cache — and also saves a download per invocation. CI is unaffected: GitHub Actions runs the gates natively, not through the toolbox |
+| DD-040 | Audible floor alerting lives in `edge` (`edge.alerting`), not the dashboard: `evaluate_alerts` is a line-for-line port of `apps/dashboard/src/thresholds.ts`'s rules (health index below threshold → warning, below 75% of it → critical; temperature above threshold → warning; any non-`normal` model `alert_level` surfaced as-is) and drives a `Buzzer` protocol — `NullBuzzer` by default, `GpioBuzzer` (1 beep warning / 3 beeps critical, `RPi.GPIO`, lazily imported) when `BUZZER=gpio` | Mirrors DD-003's provider pattern so no dev machine or CI container ever imports `RPi.GPIO`. Putting it on the edge means the floor hears an alert even when no browser has the dashboard open; duplicating the rules (rather than sharing a package) follows DD-002's precedent of independent re-implementations across the TS/Python boundary, with the module docstring naming its twin so the two are changed together. Buzzer init failure falls back to `NullBuzzer` and the beep pattern runs via `asyncio.to_thread`, so neither a missing buzzer nor its sleep pattern can stop or skew the monitoring loop |
+| DD-041 | `HardwareSensorProvider` asserts the ADXL345 `DEVID` register reads `0xE5` before configuring the part, and both sampling loops (the 64-sample vibration burst and `edge.main.publish_loop`) pace against a running deadline instead of sleeping a fixed interval after each unit of work | Bench bring-up on the real Pi found that a press-fitted (unsoldered) breakout header returns a well-formed all-zero identity while supply rails measure correct, so the fault surfaced as plausible-looking zero data rather than an error — the identity gate turns it into a startup failure with a wiring hint. The fixed-sleep loops made acquisition time additive: measured 751 Hz for a configured 800 Hz burst, and a 6.00 s publish period for a configured 5 s (the DS18B20's ~750 ms conversion). Deadline pacing removes that drift; a cycle that overruns pushes the next deadline forward rather than bursting to catch up |
+| DD-042 | Real-dataset loaders and an RUL regressor land as standalone `ml` modules (`cwru_metadata`, `cwru_loader`, `ims_loader`, `rul`) with their own unit tests, ahead of — and separately from — wiring them into `ml.pipeline` | These are carved out of a larger in-progress backlog (local `wip/full-backlog` stash) so they can be reviewed and CI-gated on their own. `scipy` becomes a direct runtime dependency (CWRU ships MATLAB `.mat` files); `onnxruntime` is a dev-only dependency so `test_rul` can round-trip the exported `rul.onnx` through a real inference session. `ml.pipeline`'s real-CWRU branch is still the DD-031 `NotImplementedError` until the wiring change lands (§24). The backlog stash numbers its own decisions DD-038–DD-044 against a different design.md; those numbers are **not** these — renumber when that work is merged |
+| DD-043 | The research paper is kept in-repo under `docs/research/` as LaTeX source (`digital_cousin_paper.tex`) plus its compiled PDF, a `.docx` export, and generated figures; figures are reproducible via `services/ml/scripts/make_paper_figures.py` (run with `uv run --with matplotlib --with seaborn --with onnxruntime`) rather than hand-made | Keeps the paper's numbers traceable to the same loaders/artifacts the code uses. Plotting libraries are pulled in ad hoc instead of becoming `ml` dependencies, since nothing in training or inference needs them; mypy ignores their missing stubs. LaTeX intermediates (`*.aux`, `*.log`) and local draft backups (`*.bak`) are gitignored, as is a root-owned duplicate `docs/research/.figures-rootowned/` left by a pre-DD-039 container run (cannot be removed without root). The committed PDF was compiled before the last `.tex` edits — rebuild it before submission |
 
 ---
 
@@ -568,6 +586,10 @@ No dependency has been added without a corresponding line item above and, where 
 | `PUBLISH_INTERVAL_SECONDS` | `edge` | `5` | How often the publish loop reads the active provider and logs/publishes a reading (DD-023) |
 | `DATABASE_PATH` | `edge`, `api` | `/data/digital_cousin.sqlite3` | SQLite file inside the shared `sqlite-data` named volume; defaults to `:memory:` if unset (DD-024) |
 | `ML_ARTIFACTS_DIR` | `edge` | `/app/ml-artifacts` | Where `edge.ml_inference.MLInferenceEngine` looks for `services/ml`'s exported `manifest.json`/ONNX models (DD-031); mounted read-only from the same host path `ml-trainer` writes into. Absent until a training run has happened — inference is disabled (null fields), not a startup failure |
+| `BUZZER` | `edge` | `none` | `none` = silent `NullBuzzer`; `gpio` = `GpioBuzzer` on a Pi (DD-040). Passed through by `docker-compose.yml` |
+| `BUZZER_GPIO_PIN` | `edge` | `18` | BCM pin driving the buzzer when `BUZZER=gpio` (DD-040) |
+| `ALERT_HEALTH_INDEX` / `ALERT_TEMPERATURE_C` | `edge` | `0.6` / `70` | Audible-alert thresholds, defaults matching the dashboard's (DD-040); the temperature value is an uncalibrated placeholder (§24). Not passed through by compose yet — set in the service environment directly if needed |
+| `TOOLBOX_UID` / `TOOLBOX_GID` | `toolbox` (compose variable substitution) | `0` / `0` | Container user for quality gates and git hooks; the `Makefile` and Husky hooks export the host's `id -u`/`id -g` (DD-039) |
 | `COPILOT_LLM_MODE` | `copilot` | `local` | `local` = TinyLlama/llama.cpp (no secrets); `api` = Anthropic/OpenAI fallback |
 | `LOCAL_LLM_MODEL_PATH` | `copilot` | `/app/models/tinyllama-1.1b-q4_k_m.gguf` | GGUF weights path for `COPILOT_LLM_MODE=local` — not yet downloaded/mounted anywhere (§24); `LocalLlamaClient` raises a clear error if missing rather than silently falling back |
 | `COPILOT_API_PROVIDER` | `copilot` | `anthropic` | `anthropic` or `openai` — which API-fallback provider `COPILOT_LLM_MODE=api` uses |
@@ -578,7 +600,8 @@ No dependency has been added without a corresponding line item above and, where 
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | inside `$SECRETS_FILE` only, never in-repo | empty | Copilot API-fallback credentials; only read when `COPILOT_LLM_MODE=api` |
 
 `.env.example` documents all of these except the two secret keys, which exist only inside the
-externally-mounted `$SECRETS_FILE`.
+externally-mounted `$SECRETS_FILE`, the `ALERT_*` thresholds, and `TOOLBOX_UID`/`TOOLBOX_GID` (set
+automatically by the `Makefile`/hooks).
 
 ---
 
@@ -748,14 +771,22 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
       etc.) will still fail without the sensors, but the rest of the stack can be validated now
 - [ ] Tune the vibration sampling loop's real-time behavior (buffering, jitter, sample count/rate)
       once real hardware is available — DD-022 deliberately scoped Phase 2 to a correct but modest
-      64-sample burst rather than a continuous 3,200 Hz stream, which needs empirical tuning
+      64-sample burst rather than a continuous 3,200 Hz stream, which needs empirical tuning.
+      **Partly done (Entry 18, DD-041):** burst and publish loops are now deadline-paced, removing
+      the measured 751 Hz / 6.00 s drift; continuous streaming is still open.
 - [x] Build out the *full* dashboard (health gauge, historical trend charts, alert module, ROI
       estimator) — §6.5, implemented §28 Entry 13, **verified §28 Entry 14**: `make lint`/`typecheck`/
       `test` pass and a real-browser click-through confirmed every component renders and computes
       correctly against the live stack.
 - [ ] Download/preprocess CWRU + IMS datasets into `services/ml` — still the actual blocker on real
       (non-synthetic) model training; `ml.datasets` raises a clear error until this is done, and
-      `ml.pipeline`'s real-CWRU code path is an explicit `NotImplementedError` pending it (DD-031)
+      `ml.pipeline`'s real-CWRU code path is an explicit `NotImplementedError` pending it (DD-031).
+      **Loaders landed (Entry 18, DD-042):** `ml.cwru_loader`/`ml.ims_loader`/`ml.rul` exist and are
+      unit-tested; still open: commit the download script and wire the loaders + RUL regressor into
+      `ml.pipeline` (both exist in the local `wip/full-backlog` stash).
+- [ ] Verify the `GpioBuzzer` (DD-040) on the Pi with a buzzer actually fitted (`BUZZER=gpio`) —
+      only exercised against a fake `RPi.GPIO` in tests so far. Calibrate `ALERT_TEMPERATURE_C` on the
+      pilot machine; `70` is a placeholder shared with the dashboard.
 - [x] Implement Isolation Forest + 1D conv autoencoder training + ONNX export in `services/ml`, and
       have `edge` populate `anomaly_score`/`health_index`/`model_confidence`/`alert_level` via
       `edge.ml_inference` — §28 Entry 13 (DD-031), **verified §28 Entry 14**: `make train-synthetic`
@@ -800,17 +831,17 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
       still not done; every commit on this branch, including Entry 13/14's, has only ever been
       validated locally, never on GitHub Actions (§29).
 
-- [ ] Verify `scripts/bootstrap.ps1` and `scripts/make.ps1` (added §28 Entry 17, DD-038) on an
-      actual native Windows machine — written and reviewed by inspection only in the session that
-      added them (no PowerShell interpreter available there to execute them); until run for real,
-      treat as a reasoned-but-unverified assumption, not a confirmed fact.
+- [x] ~~Verify `scripts/bootstrap.ps1` and `scripts/make.ps1` on native Windows~~ — moot: both
+      scripts were withdrawn in Entry 18 (DD-038); Windows hosts use WSL2.
 
 ## 25. Known Issues
 
-- `scripts/bootstrap.ps1`/`scripts/make.ps1` (DD-038) have not been executed on a real Windows
-  machine — the session that wrote them had no PowerShell interpreter to run or lint them against.
-  Written as direct, line-for-line translations of the already-verified `bootstrap.sh`/`Makefile`,
-  but treat as unverified until someone actually runs them on Windows (§24).
+- ~~`scripts/bootstrap.ps1`/`scripts/make.ps1` (DD-038) unverified on real Windows~~ — **resolved
+  by removal** (Entry 18); the scripts no longer exist.
+- `docs/research/digital_cousin_paper.pdf` was compiled before the final `.tex` edits (DD-043) —
+  rebuild before treating it as the submission copy.
+- `docs/research/.figures-rootowned/` (gitignored) is a root-owned leftover from a pre-DD-039
+  container run; remove it with root (`sudo rm -r`) when convenient.
 - Mosquitto broker has `allow_anonymous true` and no TLS (DD-016) — acceptable only while the
   broker is unreachable outside the Docker network / Pi-local network.
 - `HardwareSensorProvider.read()` is fully implemented (DD-022) but has only ever run against a
@@ -870,7 +901,9 @@ real datasets, a real LLM call), and §28 Entry 14 for exactly what was run and 
   context, not that it's attributed to the *correct* field — a response could quote a real context
   number but apply it to the wrong claim and still pass. Full claim-level semantic grounding needs
   entity linking, out of scope for this pass.
-- The `toolbox` container (and any `docker compose run`) runs as root by default, including when
+- **Resolved (Entry 18, DD-039)** — the `toolbox` container now runs as the host UID/GID via the
+  `Makefile`/Husky hooks. Original item, kept for history: the `toolbox` container (and any
+  `docker compose run`) runs as root by default, including when
   Husky's pre-commit hook shells into it (§7.6) — every hook-triggered `git`/file-write operation
   leaves files and `.git` internals root-owned on the host, which then blocks the next host-side
   `git` command until manually `chown`'d back (DD-036, found and worked around repeatedly in Entry
@@ -1940,6 +1973,56 @@ session's start — worth committing alongside this entry's changes if the user 
 
 ---
 
+### Entry 18 — Toolbox UID fix, edge alerting, hardware bring-up fixes, ML loaders, paper (logical project time: 2026-10-17)
+
+**Task completed:** Turned the pending working tree on `feat/windows-portability` into reviewed,
+CI-gated commits, one per change:
+
+1. Withdrew the native-Windows PowerShell onboarding (DD-038 marked withdrawn; README section
+   removed). The removal was already staged by the project owner; its reason was not recorded.
+2. Toolbox container runs as the host UID/GID (DD-039), closing DD-036's Technical Debt item.
+3. Audible alerting on the edge: `edge.alerting` + buzzer wiring in `edge.main` (DD-040), with
+   `BUZZER`/`BUZZER_GPIO_PIN` passed through `docker-compose.yml` and documented in `.env.example`.
+4. Hardware bring-up fixes from the real Pi: ADXL345 `DEVID` identity gate and deadline-paced
+   sampling/publish loops (DD-041).
+5. CWRU/IMS dataset loaders and the RUL regressor as standalone, tested `ml` modules (DD-042); their
+   four test files were taken unchanged from the local `wip/full-backlog` stash.
+6. Research paper sources, figures and the figure-generation script (DD-043).
+
+**Files created:** `services/edge/src/edge/alerting.py`, `services/edge/tests/test_alerting.py`,
+`services/ml/src/ml/{cwru_metadata,cwru_loader,ims_loader,rul}.py`,
+`services/ml/tests/test_{cwru_metadata,cwru_loader,ims_loader,rul}.py`,
+`services/ml/scripts/make_paper_figures.py`, `docs/research/digital_cousin_paper.{tex,pdf,docx}`,
+`docs/research/figures/*`.
+
+**Files modified:** `.husky/{pre-commit,commit-msg}`, `Makefile`, `docker-compose.yml`,
+`docker/tools.Dockerfile`, `.env.example`, `.gitignore`, `README.md`,
+`services/edge/src/edge/{main.py,providers/hardware.py}`,
+`services/edge/tests/test_hardware_provider.py`, `services/ml/{pyproject.toml,uv.lock}`, `design.md`
+(§14, §15 DD-038–DD-043, §17, §24, §25, §26, §28, §29).
+
+**Files deleted:** `scripts/bootstrap.ps1`, `scripts/make.ps1`.
+
+**Reason for change:** Clear the accumulated working tree into segregated commits and get it merged
+to `main` through green CI.
+
+**Architectural decisions:** DD-039 through DD-043. Decision numbers continue from this file's
+DD-038; the `wip/full-backlog` stash carries its own, conflicting DD-038–DD-044 numbering, noted in
+DD-042 so it is renumbered on merge.
+
+**Verification:** Locally, `ruff check`/`ruff format --check`/`mypy .`/`pytest` pass for `edge`
+(28 tests) and `ml` (51 tests, 96% coverage), and `docker compose config` passes with both overlays.
+CI on the pushed branch is the gate for merge (§29).
+
+**Remaining work:** Wire DD-042's loaders and the RUL regressor into `ml.pipeline` and commit the
+dataset download script; verify the GPIO buzzer on real hardware; rebuild the paper PDF.
+
+**Known issues:** See §25 (stale paper PDF, root-owned figures leftover).
+
+**Recommended next task:** Carve the `ml.pipeline` wiring + `scripts/download_data.py` out of the
+`wip/full-backlog` stash as the next branch, renumbering its design decisions from DD-044.
+
+---
 
 ## 29. Current Repository State
 
@@ -1990,9 +2073,11 @@ session's start — worth committing alongside this entry's changes if the user 
   but its own composite action pinned an internal `setup-trivy` dependency to a tag since deleted
   upstream; `v0.36.0` pins that same dependency by commit SHA. **Confirmed on a real CI run** (Entry
   11), not just locally.
-- **Native-Windows onboarding added** (Entry 17, 2026-09-18, DD-038): `scripts/bootstrap.ps1` and
-  `scripts/make.ps1` let the project run on Windows without WSL2/Git Bash/GNU Make — line-for-line
-  translations of `bootstrap.sh`/`Makefile`, unverified on real Windows (§24, §25).
+- **Native-Windows onboarding added** (Entry 17, 2026-09-18, DD-038), then **withdrawn** (Entry 18):
+  `scripts/bootstrap.ps1`/`scripts/make.ps1` no longer exist; Windows hosts use WSL2.
+- **Entry 18 (2026-10-17)** merged `feat/windows-portability` into `main` via PR: toolbox runs as the
+  host user (DD-039), edge audible alerting (DD-040), ADXL345 identity gate + deadline pacing
+  (DD-041), CWRU/IMS loaders + RUL regressor modules (DD-042), research paper sources (DD-043).
 - **Repo layout scaffolded to production-grade conventions** (Entry 5, DD-020): `docs/{architecture,
   adr,research,hardware}/` and `packages/` now exist, each with a README stub; no content moved out
   of `design.md`, which stays whole and at root as CLAUDE.md's single authoritative engineering-

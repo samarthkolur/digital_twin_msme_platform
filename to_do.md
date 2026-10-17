@@ -88,13 +88,18 @@ autoencoder.onnx(+.onnx.data), health_index_calibration.json, manifest.json}`. N
 - [ ] Tune the vibration sampling loop's real-time behavior (buffering, jitter, sample count/rate) once
       real hardware is available — DD-022 deliberately scoped Phase 2 to a correct-but-modest 64-sample
       burst rather than a continuous 3,200 Hz stream; this needs empirical tuning against real silicon.
-      (This also gates ever moving `services/ml`'s window length past 64 samples, DD-031.)
+      (This also gates ever moving `services/ml`'s window length past 64 samples, DD-031.) Burst
+      and publish loops are deadline-paced as of Entry 18 (DD-041); continuous streaming still open.
+- [ ] Verify the GPIO buzzer (`BUZZER=gpio`, design.md DD-040) on the Pi with a buzzer fitted, and
+      calibrate `ALERT_TEMPERATURE_C` on the pilot machine (`70` is a placeholder).
 
 ## 3. Phase 4 — ML pipeline (`services/ml`) — code written (Entry 13) and verified (Entry 14); next:
 
 - [ ] Download and preprocess the CWRU and IMS Bearing datasets into `services/ml/data/` —
       `ml.datasets` already raises a clear error pointing here until this is done; `ml.pipeline`'s
-      real-data code path is an explicit `NotImplementedError` pending it.
+      real-data code path is an explicit `NotImplementedError` pending it. Loaders + RUL regressor
+      landed in Entry 18 (DD-042); still to do: commit the download script and wire them into
+      `ml.pipeline`.
 - [ ] Once real data exists: re-run the pipeline against it instead of `--allow-synthetic`, and check
       the reported F1 scores against design.md §9's real targets (Isolation Forest ≥0.80, autoencoder
       ≥0.85) — the synthetic-data numbers (0.787 / 0.995) confirmed the pipeline runs end-to-end but
@@ -138,8 +143,8 @@ autoencoder.onnx(+.onnx.data), health_index_calibration.json, manifest.json}`. N
 - [ ] Give `api`'s `GET /state/history` pagination or a time-range parameter so the dashboard's
       historical log can actually reach the originally-scoped 24h window instead of the current
       1000-row cap (~83 minutes at the default publish interval) — design.md §26.
-- [ ] Run the `toolbox`/compose containers as the host UID/GID (design.md §26, DD-036) so hook-
-      triggered git/file operations stop leaving root-owned files behind.
+- [x] Run the `toolbox`/compose containers as the host UID/GID (design.md §26, DD-036) so hook-
+      triggered git/file operations stop leaving root-owned files behind — done, Entry 18 (DD-039).
 
 ---
 
