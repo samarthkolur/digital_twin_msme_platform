@@ -115,10 +115,26 @@ async def publish_loop(
     ml_engine: MLInferenceEngine | None = None,
     buzzer: Buzzer | None = None,
 ) -> None:
-    """Calls `read_and_publish_once` on a fixed interval, forever."""
+    """Calls `read_and_publish_once` on a fixed period, forever.
+
+    The wait is scheduled against a running deadline rather than slept for a
+    fixed interval after each cycle, because acquisition is not instantaneous:
+    the DS18B20 needs ~750 ms for a 12-bit conversion and the vibration burst
+    another 80 ms. Sleeping `PUBLISH_INTERVAL_SECONDS` *after* that work made
+    the interval additive, measured at 6.00 s (0.167 Hz) for a configured 5 s.
+    If a cycle ever overruns the period the next deadline is pushed forward
+    rather than catching up in a burst, so a slow read cannot cause a backlog
+    of back-to-back publishes.
+    """
+    loop = asyncio.get_running_loop()
+    next_publish_at = loop.time() + PUBLISH_INTERVAL_SECONDS
     while True:
-        await asyncio.sleep(PUBLISH_INTERVAL_SECONDS)
+        await asyncio.sleep(max(0.0, next_publish_at - loop.time()))
         await read_and_publish_once(provider, client, raw_store, state_store, ml_engine, buzzer)
+
+        next_publish_at += PUBLISH_INTERVAL_SECONDS
+        if next_publish_at < loop.time():
+            next_publish_at = loop.time() + PUBLISH_INTERVAL_SECONDS
 
 
 @asynccontextmanager

@@ -91,11 +91,21 @@ class HardwareSensorProvider(SensorProvider):
 
     def read(self) -> SensorSample:
         magnitudes_g = []
-        for _ in range(_SAMPLE_COUNT):
+        # Deadline-based pacing: each sample is scheduled against a fixed
+        # origin rather than slept for a fixed interval after the transfer.
+        # Sleeping `_SAMPLE_INTERVAL_S` *after* each read makes the SPI
+        # transfer time additive, which measured 85.2 ms per 64-sample burst
+        # (751 Hz) instead of the configured 800 Hz the state object reports.
+        burst_start = time.perf_counter()
+        for sample_index in range(_SAMPLE_COUNT):
             x, y, z = self._read_axes_raw()
             x_g, y_g, z_g = (v * _SCALE_G_PER_LSB for v in (x, y, z))
             magnitudes_g.append((x_g**2 + y_g**2 + z_g**2) ** 0.5)
-            time.sleep(_SAMPLE_INTERVAL_S)
+
+            deadline = burst_start + (sample_index + 1) * _SAMPLE_INTERVAL_S
+            remaining = deadline - time.perf_counter()
+            if remaining > 0:
+                time.sleep(remaining)
 
         vibration = compute_vibration_features(magnitudes_g, _SAMPLING_HZ)
 
