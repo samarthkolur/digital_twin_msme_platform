@@ -211,22 +211,22 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "numpy", specifier = ">=2.0" },
+    { name = "numpy", specifier = ">=2.4.6" },
     { name = "onnx", specifier = ">=1.23.2" },
-    { name = "onnxscript", specifier = ">=0.7.1" },
-    { name = "pandas", specifier = ">=3.0.5" },
+    { name = "onnxscript", specifier = ">=0.7.2" },
+    { name = "pandas", specifier = ">=3.0.6" },
     { name = "scikit-learn", specifier = ">=1.9.1" },
     { name = "scipy", specifier = ">=1.17.1" },
     { name = "skl2onnx", specifier = ">=1.20.0" },
-    { name = "torch", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "torch", specifier = ">=2.14.1", index = "https://download.pytorch.org/whl/cpu" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy", specifier = ">=2.3.1" },
+    { name = "mypy", specifier = ">=2.4.0" },
     { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
 ]
 
 [[package]]
@@ -635,7 +635,7 @@ wheels = [
 
 [[package]]
 name = "torch"
-version = "2.13.0+cpu"
+version = "2.14.1+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 dependencies = [
     { name = "filelock" },
@@ -647,11 +647,11 @@ dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-linux_s390x.whl", hash = "sha256:6e9817dbdf5ea76789babd46e457eac5bf14ff566cf85f8addbfdff2d56601ce" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:84453b69508ec79902f899c5ed9495acb9e2bbe9fda5f1d5d6f19e3c3842e1a7" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:6746dbcbeb526eb61330b76b41ff1b4eb848951103a892eeb080dfa2b264667b" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-win_amd64.whl", hash = "sha256:10717d8b3b67c45a4788bf7ffc0bab1ea1e5ebbedd24466be6100102d141fac1" },
-    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.13.0%2Bcpu-cp311-cp311-win_arm64.whl", hash = "sha256:2b3d093abd919ad934c43d47e73ba63ceba7cbd7269fc2e9c1e4fc29e8fe45fa" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-linux_s390x.whl", hash = "sha256:cccd0a609fe3f83ab2ff651b627d5bd68c7fb33ee77a994b31c18b7c9a6f9a52" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl", hash = "sha256:36a03a3f87ec875ca39c8e29eccbaf0fc704605f78a3f7f179f157048c3c395e" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl", hash = "sha256:5e38154c8896d426a5df58bf2276b603e82184dfae4f54d77dbb212f36e34f37" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-win_amd64.whl", hash = "sha256:d14b0c8a66345b7ba43adfa86fc20d89087a0a92e440004755d49d2468ddc6e0" },
+    { url = "https://download-r2.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-win_arm64.whl", hash = "sha256:100df7e44af5c973606cfef571a14b36b0acfd165d6bbc7aabe3edac95c9ccbd" },
 ]
 
 [[package]]
