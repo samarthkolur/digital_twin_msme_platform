@@ -53,6 +53,9 @@ module = [
   "onnxscript.*",
   "scipy.*",
   "onnxruntime.*",
+  # scripts/make_paper_figures.py only; pulled in ad hoc via `uv run --with`.
+  "matplotlib.*",
+  "seaborn.*",
 ]
 ignore_missing_imports = true
 
