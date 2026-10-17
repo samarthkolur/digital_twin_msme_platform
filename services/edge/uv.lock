@@ -165,23 +165,23 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "fastapi", specifier = ">=0.143.0" },
     { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "paho-mqtt", specifier = ">=2.1" },
     { name = "pydantic", specifier = ">=2.14.1" },
     { name = "rpi-gpio", marker = "extra == 'hardware'", specifier = ">=0.7.1" },
-    { name = "spidev", marker = "extra == 'hardware'", specifier = ">=3.6" },
+    { name = "spidev", marker = "extra == 'hardware'", specifier = ">=3.8" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
     { name = "w1thermsensor", marker = "extra == 'hardware'", specifier = ">=2.3" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "mypy", specifier = ">=2.4.0" },
     { name = "onnx", specifier = ">=1.23.2" },
     { name = "pytest", specifier = ">=9.1.1" },
-    { name = "pytest-cov", specifier = ">=6.0" },
+    { name = "pytest-cov", specifier = ">=7.1.0" },
 ]
 
 [[package]]
