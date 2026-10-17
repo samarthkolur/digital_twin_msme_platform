@@ -112,3 +112,33 @@ def test_publish_loop_applies_runtime_config(monkeypatch: pytest.MonkeyPatch) ->
         (None, AlertThresholds(health_index=0.6, temperature_c=70.0)),
         ("engine", AlertThresholds(health_index=0.5, temperature_c=60.0)),
     ]
+
+
+def test_read_and_publish_once_passes_the_configured_threshold_to_ml() -> None:
+    from edge.alerting import AlertThresholds
+    from edge.ml_inference import MLInferenceResult
+
+    seen: list[float] = []
+
+    class _Engine:
+        def infer(
+            self, window: list[float], vibration: object, threshold: float
+        ) -> MLInferenceResult:
+            seen.append(threshold)
+            return MLInferenceResult(0.1, 0.9, "high", "normal")
+
+    provider = SimulatedSensorProvider()
+    raw_store = RawReadingStore(":memory:")
+    state_store = StateStore(":memory:")
+    asyncio.run(
+        read_and_publish_once(
+            provider,
+            _FakeMqttClient(),  # type: ignore[arg-type]
+            raw_store,
+            state_store,
+            _Engine(),  # type: ignore[arg-type]
+            None,
+            AlertThresholds(health_index=0.45, temperature_c=70.0),
+        )
+    )
+    assert seen == [0.45]
