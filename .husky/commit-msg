@@ -1,1 +1,1 @@
-docker compose run --rm --no-deps toolbox pnpm exec commitlint --edit "$1"
+TOOLBOX_UID="$(id -u)" TOOLBOX_GID="$(id -g)" docker compose run --rm --no-deps toolbox pnpm exec commitlint --edit "$1"

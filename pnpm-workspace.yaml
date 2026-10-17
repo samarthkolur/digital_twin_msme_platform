@@ -18,8 +18,8 @@ overrides:
   # vitest coverage's glob->minimatch->brace-expansion chain. Same pattern as
   # the vite override above: force every transitive copy onto the patched
   # line so `pnpm audit --audit-level=high` stays clean.
-  fast-uri: ">=3.1.5"
-  js-yaml: ">=4.3.1"
+  fast-uri: ">=4.1.5"
+  js-yaml: ">=5.4.1"
   postcss: ">=8.5.18"
   nanoid: ">=3.3.18"
   # brace-expansion needs per-major-line targeting (not a single blanket
@@ -32,5 +32,17 @@ overrides:
   # inequality, i.e. the same 5.x it was supposed to avoid) — `^1.1.18`
   # caret-range pins it to patched 1.x only, confirmed via `pnpm why
   # brace-expansion` after each attempt.
-  minimatch@3>brace-expansion: "^1.1.18"
-  minimatch@9>brace-expansion: "^2.1.4"
+  minimatch@3>brace-expansion: "^1.1.21"
+  minimatch@9>brace-expansion: "^2.1.7"
+  minimatch@10>brace-expansion: "^5.0.12"
+  # A second wave of advisories in the same category (dev-only transitive
+  # deps, no code change involved): browserslist/baseline-browser-mapping/
+  # source-map-js under vite + babel, and knip's smol-toml. Caret ranges keep
+  # each on its current major line. braces (via knip 5's fast-glob) and
+  # tinypool (critical, via vitest 3) have no patched release on the line
+  # their parents accept, so those are fixed by upgrading knip to 6.x and
+  # vitest to 4.x instead of an override (design.md DD-044).
+  browserslist: "^4.28.7"
+  baseline-browser-mapping: "^2.11.0"
+  source-map-js: "^1.2.2"
+  smol-toml: "^1.8.1"

@@ -15,9 +15,13 @@ class _FakeSpiDev:
     _SAMPLE_A = (0, 0, 256)  # 256 * 0.0039 g/LSB = 0.9984 g
     _SAMPLE_B = (0, 0, 266)  # 266 * 0.0039 g/LSB = 1.0374 g
 
-    def __init__(self) -> None:
+    _READ_BIT = 0x80
+    _DEVID = 0xE5
+
+    def __init__(self, devid: int = _DEVID) -> None:
         self.writes: list[tuple[int, int]] = []
         self._read_count = 0
+        self.devid = devid
         self.max_speed_hz: int = 0
         self.mode: int = 0
 
@@ -27,7 +31,10 @@ class _FakeSpiDev:
 
     def xfer2(self, data: list[int]) -> list[int]:
         if len(data) == 2:
-            self.writes.append((data[0], data[1]))
+            register = data[0]
+            if register & self._READ_BIT:  # single-register read, not a write
+                return [0, self.devid if (register & ~self._READ_BIT) == 0x00 else 0]
+            self.writes.append((register, data[1]))
             return [0, 0]
 
         sample = self._SAMPLE_A if self._read_count % 2 == 0 else self._SAMPLE_B
@@ -77,6 +84,23 @@ def test_init_configures_adxl345_registers(fake_hardware_modules: _FakeSpiDev) -
         (0x2C, 0x0D),  # BW_RATE: 800 Hz
         (0x2D, 0x08),  # POWER_CTL: measurement mode
     ]
+
+
+def test_init_rejects_all_zero_device_identity(
+    fake_hardware_modules: _FakeSpiDev,
+) -> None:
+    """An unsoldered/intermittent header reads back DEVID 0x00 while the rails
+    measure correct; the provider must refuse to start rather than publish
+    plausible-looking data from a part it never reached.
+    """
+    from edge.providers.hardware import HardwareSensorProvider
+
+    fake_hardware_modules.devid = 0x00
+
+    with pytest.raises(RuntimeError, match="identity check failed"):
+        HardwareSensorProvider()
+
+    assert fake_hardware_modules.writes == [], "must not configure an unverified part"
 
 
 def test_read_computes_ac_coupled_rms_and_temperature(

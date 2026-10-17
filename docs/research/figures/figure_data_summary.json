@@ -1,0 +1,16 @@
+{
+  "rul_calibration": {
+    "mae": 0.24732988286672977,
+    "r2": 0.18663034325776784,
+    "n_windows": 320,
+    "n_snapshots": 31,
+    "raw_outside_unit_interval": 9,
+    "raw_min": -2.7433769702911377,
+    "raw_max": 0.6589760184288025
+  },
+  "cwru_feature_separability": {
+    "n_windows": 35311,
+    "n_normal": 17311,
+    "n_faulty": 18000
+  }
+}

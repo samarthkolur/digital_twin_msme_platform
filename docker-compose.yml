@@ -14,6 +14,12 @@ services:
     build:
       context: .
       dockerfile: docker/tools.Dockerfile
+    # Run as the invoking host user so files written through the bind mount
+    # (caches, coverage, formatted sources, git objects from the pre-commit
+    # hook) are owned by that user rather than root (design.md DD-039). The
+    # Makefile and the Husky hooks export these; the 0:0 default preserves the
+    # previous root behaviour for anyone invoking the service directly.
+    user: "${TOOLBOX_UID:-0}:${TOOLBOX_GID:-0}"
     environment:
       # Non-interactive: `docker compose run` has no TTY, and pnpm otherwise
       # prompts to confirm node_modules changes when the bind-mounted
@@ -52,6 +58,10 @@ services:
       DATABASE_PATH: /data/digital_cousin.sqlite3
       PUBLISH_INTERVAL_SECONDS: "5"
       ML_ARTIFACTS_DIR: /app/ml-artifacts
+      # Audible alerting (design.md DD-040): "none" never touches GPIO, so dev
+      # machines and CI stay silent; set BUZZER=gpio on a Pi with a buzzer fitted.
+      BUZZER: ${BUZZER:-none}
+      BUZZER_GPIO_PIN: ${BUZZER_GPIO_PIN:-18}
     volumes:
       - sqlite-data:/data
       # Same host path the ml-trainer profile writes into (below) — read-only

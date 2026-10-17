@@ -55,3 +55,8 @@ Thumbs.db
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# --- LaTeX build intermediates / local paper drafts ---
+*.aux
+*.bak
+docs/research/.figures-rootowned/

@@ -33,6 +33,11 @@ clean: ## Remove containers, networks and dangling volumes for this project
 
 ## Quality gates (run inside the toolbox container, no host deps required) --
 
+# Run the toolbox as the host user so nothing it writes through the bind mount
+# comes back root-owned (design.md DD-039).
+export TOOLBOX_UID := $(shell id -u)
+export TOOLBOX_GID := $(shell id -g)
+
 TOOLBOX := $(COMPOSE) run --rm --no-deps toolbox
 
 lint: ## Lint TypeScript + Python

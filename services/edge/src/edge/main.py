@@ -12,6 +12,7 @@ import paho.mqtt.client as mqtt
 from fastapi import FastAPI
 from paho.mqtt.enums import CallbackAPIVersion
 
+from edge.alerting import AlertThresholds, Buzzer, evaluate_alerts, get_buzzer, highest_level
 from edge.ml_inference import MLInferenceEngine
 from edge.providers import SensorProvider, get_provider
 from edge.storage import RawReadingStore, StateStore
@@ -30,6 +31,14 @@ PUBLISH_INTERVAL_SECONDS = float(os.environ.get("PUBLISH_INTERVAL_SECONDS", "5")
 # the same host path read-only. Absent until a training run has happened
 # (design.md §24) — MLInferenceEngine.load() handles that by returning None.
 ML_ARTIFACTS_DIR = Path(os.environ.get("ML_ARTIFACTS_DIR", "/app/ml-artifacts"))
+# Audible alerting. Defaults to "none" so a dev machine or CI container never
+# touches GPIO; set BUZZER=gpio on a Pi with a buzzer fitted (design.md §6.2).
+BUZZER = os.environ.get("BUZZER", "none")
+BUZZER_GPIO_PIN = int(os.environ.get("BUZZER_GPIO_PIN", "18"))
+ALERT_THRESHOLDS = AlertThresholds(
+    health_index=float(os.environ.get("ALERT_HEALTH_INDEX", "0.6")),
+    temperature_c=float(os.environ.get("ALERT_TEMPERATURE_C", "70")),
+)
 
 _provider: SensorProvider | None = None
 
@@ -40,6 +49,7 @@ async def read_and_publish_once(
     raw_store: RawReadingStore,
     state_store: StateStore,
     ml_engine: MLInferenceEngine | None = None,
+    buzzer: Buzzer | None = None,
 ) -> None:
     """Reads the active sensor provider once, logs it to SQLite (both the
     Phase 2 raw log and the Phase 3 state history), runs ML inference if a
@@ -83,6 +93,19 @@ async def read_and_publish_once(
     state = state_store.latest(ASSET_ID)
     client.publish(STATE_MQTT_TOPIC, json.dumps(state))
 
+    if buzzer is not None and state is not None:
+        alerts = evaluate_alerts(state, ALERT_THRESHOLDS)
+        level = highest_level(alerts)
+        if level is not None:
+            for alert in alerts:
+                logger.warning("alert (%s): %s", alert.level, alert.message)
+            try:
+                # Off-thread: the beep pattern sleeps, and the publish loop's
+                # period must not drift because the buzzer is sounding.
+                await asyncio.to_thread(buzzer.signal, level)
+            except Exception:
+                logger.exception("buzzer signal failed, continuing")
+
 
 async def publish_loop(
     provider: SensorProvider,
@@ -90,11 +113,28 @@ async def publish_loop(
     raw_store: RawReadingStore,
     state_store: StateStore,
     ml_engine: MLInferenceEngine | None = None,
+    buzzer: Buzzer | None = None,
 ) -> None:
-    """Calls `read_and_publish_once` on a fixed interval, forever."""
+    """Calls `read_and_publish_once` on a fixed period, forever.
+
+    The wait is scheduled against a running deadline rather than slept for a
+    fixed interval after each cycle, because acquisition is not instantaneous:
+    the DS18B20 needs ~750 ms for a 12-bit conversion and the vibration burst
+    another 80 ms. Sleeping `PUBLISH_INTERVAL_SECONDS` *after* that work made
+    the interval additive, measured at 6.00 s (0.167 Hz) for a configured 5 s.
+    If a cycle ever overruns the period the next deadline is pushed forward
+    rather than catching up in a burst, so a slow read cannot cause a backlog
+    of back-to-back publishes.
+    """
+    loop = asyncio.get_running_loop()
+    next_publish_at = loop.time() + PUBLISH_INTERVAL_SECONDS
     while True:
-        await asyncio.sleep(PUBLISH_INTERVAL_SECONDS)
-        await read_and_publish_once(provider, client, raw_store, state_store, ml_engine)
+        await asyncio.sleep(max(0.0, next_publish_at - loop.time()))
+        await read_and_publish_once(provider, client, raw_store, state_store, ml_engine, buzzer)
+
+        next_publish_at += PUBLISH_INTERVAL_SECONDS
+        if next_publish_at < loop.time():
+            next_publish_at = loop.time() + PUBLISH_INTERVAL_SECONDS
 
 
 @asynccontextmanager
@@ -105,6 +145,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state_store = StateStore(DATABASE_PATH)
     ml_engine = MLInferenceEngine.load(ML_ARTIFACTS_DIR)
 
+    try:
+        buzzer = get_buzzer(BUZZER, BUZZER_GPIO_PIN)
+    except Exception:
+        # A missing or misconfigured buzzer must not stop the twin from
+        # monitoring: fall back to the silent path and say so.
+        logger.exception("buzzer init failed, continuing without audible alerts")
+        buzzer = get_buzzer("none", BUZZER_GPIO_PIN)
+
     client = mqtt.Client(CallbackAPIVersion.VERSION2)
     # connect_async + loop_start defer/retry the connection in the background
     # network thread rather than raising if the broker isn't reachable yet
@@ -113,13 +161,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client.loop_start()
 
     publish_task = asyncio.create_task(
-        publish_loop(_provider, client, raw_store, state_store, ml_engine)
+        publish_loop(_provider, client, raw_store, state_store, ml_engine, buzzer)
     )
 
     logger.info(
-        "edge service started with provider=%s, ml_inference=%s",
+        "edge service started with provider=%s, ml_inference=%s, buzzer=%s",
         SENSOR_PROVIDER,
         "enabled" if ml_engine is not None else "disabled",
+        BUZZER,
     )
     try:
         yield
@@ -131,6 +180,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         client.disconnect()
         raw_store.close()
         state_store.close()
+        buzzer.close()
         _provider.close()
         _provider = None
 
