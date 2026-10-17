@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Digital Cousin copilot: retrieval-grounded natural-language interface over machine state"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "fastapi>=0.115",
+  "fastapi>=0.139.2",
   "uvicorn[standard]>=0.32",
   "pydantic>=2.9",
   "httpx>=0.27",
