@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Digital Cousin edge service: sensor acquisition, feature extraction, state sync"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "fastapi>=0.143.0",
+  "fastapi>=0.162.0",
   "uvicorn[standard]>=0.54.0",
   "pydantic>=2.14.1",
   "paho-mqtt>=2.1",
@@ -12,7 +12,7 @@ dependencies = [
   # Forest + autoencoder models. Ships prebuilt wheels (no native compiler
   # needed at install time, unlike the optional `hardware`/`local-llm`
   # extras elsewhere in this repo), so it's a plain dependency, not extra.
-  "onnxruntime>=1.31.0",
+  "onnxruntime>=1.31.1",
 ]
 
 [project.optional-dependencies]
