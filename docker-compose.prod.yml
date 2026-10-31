@@ -13,6 +13,12 @@ services:
     develop: !reset []
     environment:
       SENSOR_PROVIDER: hardware
+      # Thresholds disabled during field data collection — set to 9999 so
+      # nothing triggers until real thresholds are derived from the dataset.
+      ALERT_KURTOSIS_WARNING: "9999"
+      ALERT_KURTOSIS_CRITICAL: "9999"
+      ALERT_RMS_G_WARNING: "9999"
+      ALERT_RMS_G_CRITICAL: "9999"
     devices:
       - "/dev/spidev0.0:/dev/spidev0.0"
       - "/dev/gpiomem:/dev/gpiomem"
