@@ -4,9 +4,9 @@ version = "0.1.0"
 description = "Digital Cousin copilot: retrieval-grounded natural-language interface over machine state"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "fastapi>=0.143.0",
+  "fastapi>=0.162.0",
   "uvicorn[standard]>=0.54.0",
-  "pydantic>=2.14.1",
+  "pydantic>=2.14.2",
   "httpx>=0.28.1",
 ]
 
@@ -21,9 +21,9 @@ local-llm = [
 
 [dependency-groups]
 dev = [
-  "pytest>=9.1.1",
+  "pytest>=9.2.0",
   "pytest-cov>=7.1.0",
-  "mypy>=2.4.0",
+  "mypy>=2.4.1",
 ]
 
 [build-system]
