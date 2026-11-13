@@ -4,15 +4,15 @@ version = "0.1.0"
 description = "Digital Cousin edge service: sensor acquisition, feature extraction, state sync"
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "fastapi>=0.143.0",
+  "fastapi>=0.162.2",
   "uvicorn[standard]>=0.54.0",
-  "pydantic>=2.14.1",
-  "paho-mqtt>=2.1",
+  "pydantic>=2.14.3",
+  "paho-mqtt>=2.2.0",
   # ONNX inference (design.md DD-031) for services/ml's exported Isolation
   # Forest + autoencoder models. Ships prebuilt wheels (no native compiler
   # needed at install time, unlike the optional `hardware`/`local-llm`
   # extras elsewhere in this repo), so it's a plain dependency, not extra.
-  "onnxruntime>=1.31.0",
+  "onnxruntime>=1.31.1",
 ]
 
 [project.optional-dependencies]
@@ -27,9 +27,9 @@ hardware = [
 
 [dependency-groups]
 dev = [
-  "pytest>=9.1.1",
+  "pytest>=9.2.0",
   "pytest-cov>=7.1.0",
-  "mypy>=2.4.0",
+  "mypy>=2.4.1",
   "httpx>=0.28.1",
   # Test-only: hand-builds tiny stub ONNX graphs to exercise edge.ml_inference
   # without depending on services/ml's actual training stack (sklearn/torch)
